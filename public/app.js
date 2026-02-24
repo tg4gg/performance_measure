@@ -31,6 +31,7 @@ const state = {
   groups: loadLocal('groups', []),
   marketCache: {},
   resolveCache: loadLocal('resolveCache', {}),
+  symbolNames: loadLocal('symbolNames', {}),
   activeRange: 'ytd',
   chart: null,
   lastCompare: null,
@@ -45,6 +46,7 @@ const groupName = document.getElementById('groupName');
 const saveGroupBtn = document.getElementById('saveGroupBtn');
 const groupsContainer = document.getElementById('groupsContainer');
 const runCompareBtn = document.getElementById('runCompareBtn');
+const clearCompareBtn = document.getElementById('clearCompareBtn');
 const compareFields = [
   document.getElementById('compareField1'),
   document.getElementById('compareField2'),
@@ -53,7 +55,13 @@ const compareFields = [
 ];
 const compareSuggestions = document.getElementById('compareSuggestions');
 const perfTableBody = document.getElementById('perfTableBody');
+const yoyTitle = document.getElementById('yoyTitle');
+const yoyTableBody = document.getElementById('yoyTableBody');
+const chartLegend = document.getElementById('chartLegend');
 const rangeButtons = document.getElementById('rangeButtons');
+const pendingSymbolNameRequests = new Map();
+const PROCESSING_MIN_MS =
+  typeof window !== 'undefined' && /jsdom/i.test(window.navigator.userAgent) ? 0 : 180;
 
 function loadLocal(key, fallback) {
   try {
@@ -67,6 +75,29 @@ function loadLocal(key, fallback) {
 
 function saveLocal(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withButtonProcessing(button, action) {
+  if (!button) return action();
+  const original = button.textContent;
+  const startedAt = Date.now();
+  button.disabled = true;
+  button.textContent = 'Procesando...';
+
+  try {
+    return await action();
+  } finally {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed < PROCESSING_MIN_MS) {
+      await sleep(PROCESSING_MIN_MS - elapsed);
+    }
+    button.disabled = false;
+    button.textContent = original;
+  }
 }
 
 // Prevent quota issues from old large historical cache stored in localStorage.
@@ -102,6 +133,9 @@ async function resolveInputToSymbol(raw) {
 
   const cached = state.resolveCache[key];
   if (cached && cached.symbol) {
+    if (cached.name) {
+      state.symbolNames[cached.symbol] = cached.name;
+    }
     return { symbol: cached.symbol, source: 'local-cache' };
   }
 
@@ -123,8 +157,71 @@ async function resolveInputToSymbol(raw) {
     ts: Date.now()
   };
   saveLocal('resolveCache', state.resolveCache);
+  if (payload.name) {
+    state.symbolNames[payload.symbol] = payload.name;
+    saveLocal('symbolNames', state.symbolNames);
+  }
 
   return { symbol: payload.symbol, source: payload.source || 'remote' };
+}
+
+async function ensureSymbolName(symbol) {
+  if (!symbol) return null;
+  if (state.symbolNames[symbol]) return state.symbolNames[symbol];
+  if (pendingSymbolNameRequests.has(symbol)) {
+    return pendingSymbolNameRequests.get(symbol);
+  }
+
+  const promise = (async () => {
+    try {
+      const res = await fetch(`/api/resolve?query=${encodeURIComponent(symbol)}`);
+      if (!res.ok) return null;
+      const payload = await res.json();
+      if (!payload?.symbol || !payload?.name) return null;
+      state.symbolNames[payload.symbol] = payload.name;
+      state.symbolNames[symbol] = payload.name;
+      saveLocal('symbolNames', state.symbolNames);
+      return payload.name;
+    } catch {
+      return null;
+    } finally {
+      pendingSymbolNameRequests.delete(symbol);
+    }
+  })();
+
+  pendingSymbolNameRequests.set(symbol, promise);
+  return promise;
+}
+
+function setTickerTitle(node, symbol) {
+  if (!node || !symbol) return;
+  const name = state.symbolNames[symbol];
+  node.title = name ? `${symbol} - ${name}` : `Resolviendo nombre para ${symbol}...`;
+}
+
+function bindTickerHoverResolvers(rootNode) {
+  if (!rootNode) return;
+  const nodes = [...rootNode.querySelectorAll('[data-symbol]')];
+  nodes.forEach((node) => {
+    if (node.dataset.hoverBound === '1') return;
+    node.dataset.hoverBound = '1';
+    node.addEventListener('mouseenter', async () => {
+      const symbol = node.dataset.symbol;
+      if (!symbol) return;
+      await ensureSymbolName(symbol);
+      setTickerTitle(node, symbol);
+    });
+  });
+}
+
+async function enrichTickerHover(rootNode) {
+  if (!rootNode) return;
+  const nodes = [...rootNode.querySelectorAll('[data-symbol]')];
+  const symbols = [...new Set(nodes.map((n) => n.dataset.symbol).filter(Boolean))];
+  nodes.forEach((node) => setTickerTitle(node, node.dataset.symbol));
+  bindTickerHoverResolvers(rootNode);
+  await Promise.all(symbols.map((s) => ensureSymbolName(s)));
+  nodes.forEach((node) => setTickerTitle(node, node.dataset.symbol));
 }
 
 function parseLineEntry(line) {
@@ -218,7 +315,7 @@ function renderAssetsDraft() {
     const row = document.createElement('div');
     row.className = 'asset-row';
     row.innerHTML = `
-      <span class="pill">${asset.raw} -> ${asset.symbol}</span>
+      <span class="pill">${asset.raw} -> <span data-symbol="${asset.symbol}">${asset.symbol}</span></span>
       <input type="number" min="0" step="0.01" value="${asset.weight}" data-index="${index}" />
       <span class="muted">peso %</span>
     `;
@@ -229,6 +326,7 @@ function renderAssetsDraft() {
 
     assetsContainer.appendChild(row);
   });
+  void enrichTickerHover(assetsContainer);
 }
 
 function setDraftFromGroup(group) {
@@ -290,11 +388,16 @@ function renderGroups() {
     const row = document.createElement('div');
     row.className = 'group-row';
 
-    const composition = group.assets.map((a) => `${a.symbol} (${a.weight}%)`).join(' + ');
+    const composition = group.assets
+      .map(
+        (a) =>
+          `<span class="group-pick" data-pick-value="${a.symbol}" data-symbol="${a.symbol}">${a.symbol}</span> (${a.weight}%)`
+      )
+      .join(' + ');
 
     row.innerHTML = `
       <div>
-        <strong>${group.name}</strong>
+        <strong class="group-pick" data-pick-value="${group.name}">${group.name}</strong>
         <div class="muted">${composition}</div>
       </div>
       <div class="group-actions">
@@ -308,23 +411,57 @@ function renderGroups() {
   });
 
   groupsContainer.querySelectorAll('button[data-action="edit"]').forEach((btn) => {
-    btn.addEventListener('click', () => editGroup(Number(btn.dataset.index)));
+    btn.addEventListener('click', async () =>
+      withButtonProcessing(btn, async () => {
+        editGroup(Number(btn.dataset.index));
+      })
+    );
   });
 
   groupsContainer.querySelectorAll('button[data-action="delete"]').forEach((btn) => {
-    btn.addEventListener('click', () => deleteGroup(Number(btn.dataset.index)));
+    btn.addEventListener('click', async () =>
+      withButtonProcessing(btn, async () => {
+        deleteGroup(Number(btn.dataset.index));
+      })
+    );
   });
   groupsContainer.querySelectorAll('button[data-action="components"]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      try {
-        await compareGroupComponents(Number(btn.dataset.index));
-      } catch (err) {
-        alert(err.message || 'Error mostrando componentes del grupo');
-      }
+      await withButtonProcessing(btn, async () => {
+        try {
+          await compareGroupComponents(Number(btn.dataset.index));
+        } catch (err) {
+          alert(err.message || 'Error mostrando componentes del grupo');
+        }
+      });
+    });
+  });
+  groupsContainer.querySelectorAll('[data-pick-value]').forEach((el) => {
+    el.addEventListener('click', () => {
+      fillNextComparisonField(el.dataset.pickValue || '');
     });
   });
 
   renderSuggestions();
+  void enrichTickerHover(groupsContainer);
+}
+
+function fillNextComparisonField(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return;
+
+  const empty = compareFields.find((field) => field && !field.value.trim());
+  if (empty) {
+    empty.value = raw;
+    empty.focus();
+    return;
+  }
+
+  // If all filled, overwrite the first one as fallback.
+  if (compareFields[0]) {
+    compareFields[0].value = raw;
+    compareFields[0].focus();
+  }
 }
 
 function trimToRange(points, range) {
@@ -456,13 +593,76 @@ function alignSeriesCollection(seriesEntries) {
   return { labels, datasets };
 }
 
+function isTickerLabel(label) {
+  return /^\^?[A-Z]{1,5}(?:-[A-Z]{1,4}|=[A-Z])?$/.test(String(label || '').trim());
+}
+
+const htmlLegendPlugin = {
+  id: 'htmlLegend',
+  afterUpdate(chart, _args, options) {
+    const container = document.getElementById(options?.containerID || '');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const allowYoy = new Set(['3y', '5y', '10y']).has(state.activeRange);
+    chart.data.datasets.forEach((dataset, index) => {
+      const item = document.createElement('div');
+      item.className = 'legend-item';
+
+      const colorDot = document.createElement('span');
+      colorDot.className = 'legend-color';
+      colorDot.style.background = dataset.borderColor || '#97abc8';
+
+      const mainBtn = document.createElement('button');
+      mainBtn.type = 'button';
+      mainBtn.className = 'legend-main';
+      if (!chart.isDatasetVisible(index)) {
+        mainBtn.classList.add('off');
+      }
+      mainBtn.dataset.role = 'toggle';
+      mainBtn.dataset.datasetIndex = String(index);
+      mainBtn.textContent = dataset.label || `Serie ${index + 1}`;
+      mainBtn.addEventListener('click', () => {
+        chart.setDatasetVisibility(index, !chart.isDatasetVisible(index));
+        chart.update();
+      });
+
+      const yoyBtn = document.createElement('button');
+      yoyBtn.type = 'button';
+      yoyBtn.className = 'legend-yoy';
+      yoyBtn.dataset.role = 'yoy';
+      yoyBtn.dataset.datasetIndex = String(index);
+      yoyBtn.textContent = '(YoY)';
+      if (!allowYoy) {
+        yoyBtn.classList.add('off');
+      }
+      yoyBtn.addEventListener('click', () => {
+        if (!allowYoy) {
+          renderYoYMessage('YoY', 'Disponible solo para rangos 3Y, 5Y y 10Y.');
+          return;
+        }
+        showYoYForDataset(index, chart);
+      });
+
+      item.appendChild(colorDot);
+      item.appendChild(mainBtn);
+      item.appendChild(yoyBtn);
+      container.appendChild(item);
+    });
+  }
+};
+
 function upsertChart(labels, datasets) {
   const ctx = document.getElementById('chart');
 
   if (state.chart) {
+    if (typeof state.chart.resetZoom === 'function') {
+      state.chart.resetZoom();
+    }
     state.chart.data.labels = labels;
     state.chart.data.datasets = datasets;
     state.chart.update();
+    renderYoYMessage('YoY', 'Haz click en una serie de la leyenda para ver Year-over-Year.');
     return;
   }
 
@@ -478,7 +678,43 @@ function upsertChart(labels, datasets) {
       },
       plugins: {
         legend: {
-          labels: { color: '#ebf2ff' }
+          display: false
+        },
+        htmlLegend: {
+          containerID: 'chartLegend'
+        },
+        tooltip: {
+          callbacks: {
+            label(context) {
+              const rawLabel = context?.dataset?.label || '';
+              const name = state.symbolNames[rawLabel];
+              const value = context?.parsed?.y;
+              const valueText = value == null ? '' : `: ${value.toFixed(2)}`;
+              if (name) return `${rawLabel} - ${name}${valueText}`;
+              return `${rawLabel}${valueText}`;
+            }
+          }
+        },
+        zoom: {
+          limits: {
+            x: { min: 'original', max: 'original' }
+          },
+          pan: {
+            enabled: false,
+            mode: 'x'
+          },
+          zoom: {
+            wheel: {
+              enabled: true
+            },
+            pinch: {
+              enabled: true
+            },
+            drag: {
+              enabled: true
+            },
+            mode: 'x'
+          }
         }
       },
       scales: {
@@ -496,14 +732,75 @@ function upsertChart(labels, datasets) {
           }
         }
       }
-    }
+    },
+    plugins: [htmlLegendPlugin]
   });
+  renderYoYMessage('YoY', 'Haz click en una serie de la leyenda para ver Year-over-Year.');
 }
 
 function formatPct(value) {
   if (value == null || Number.isNaN(value)) return '-';
   const sign = value > 0 ? '+' : '';
   return `${sign}${value.toFixed(2)}%`;
+}
+
+function renderYoYMessage(title, message) {
+  if (!yoyTableBody || !yoyTitle) return;
+  yoyTitle.textContent = title || 'YoY';
+  yoyTableBody.innerHTML = `<tr><td colspan="2">${message}</td></tr>`;
+}
+
+function buildYoYRows(labels, data) {
+  const byYear = new Map();
+  for (let i = 0; i < labels.length; i += 1) {
+    const date = labels[i];
+    const value = data[i];
+    if (!date || value == null || Number.isNaN(value)) continue;
+    const year = String(date).slice(0, 4);
+    if (!/^\d{4}$/.test(year)) continue;
+    byYear.set(year, Number(value));
+  }
+
+  const years = [...byYear.keys()].sort();
+  const rows = [];
+  for (let i = 1; i < years.length; i += 1) {
+    const prev = byYear.get(years[i - 1]);
+    const curr = byYear.get(years[i]);
+    if (!prev || !curr) continue;
+    rows.push({ year: years[i], value: ((curr / prev) - 1) * 100 });
+  }
+  return rows;
+}
+
+function showYoYForDataset(datasetIndex, chartRef) {
+  const chart = chartRef || state.chart;
+  if (!chart || !yoyTableBody || !yoyTitle) return;
+
+  const allowed = new Set(['3y', '5y', '10y']);
+  if (!allowed.has(state.activeRange)) {
+    renderYoYMessage('YoY', 'Disponible solo para rangos 3Y, 5Y y 10Y.');
+    return;
+  }
+
+  const dataset = chart.data?.datasets?.[datasetIndex];
+  const labels = chart.data?.labels || [];
+  if (!dataset || !Array.isArray(dataset.data)) {
+    renderYoYMessage('YoY', 'No hay datos para calcular YoY.');
+    return;
+  }
+
+  const rows = buildYoYRows(labels, dataset.data);
+  const titleName = dataset.label || 'Serie';
+  yoyTitle.textContent = `YoY: ${titleName}`;
+
+  if (rows.length === 0) {
+    yoyTableBody.innerHTML = '<tr><td colspan="2">No hay suficientes datos anuales para calcular YoY.</td></tr>';
+    return;
+  }
+
+  yoyTableBody.innerHTML = rows
+    .map((row) => `<tr><td>${row.year}</td><td>${formatPct(row.value)}</td></tr>`)
+    .join('');
 }
 
 function computePortfolioReturn(portfolio, symbolsData, range) {
@@ -518,6 +815,12 @@ function renderPerformanceTable(portfolios, symbolsData) {
   if (!perfTableBody) return;
   const rows = portfolios.map((portfolio) => ({
     label: portfolio.label,
+    symbol:
+      portfolio.assets.length === 1 &&
+      Number(portfolio.assets[0].weight) === 100 &&
+      portfolio.label === portfolio.assets[0].symbol
+        ? portfolio.assets[0].symbol
+        : null,
     ytd: computePortfolioReturn(portfolio, symbolsData, 'ytd'),
     oneYear: computePortfolioReturn(portfolio, symbolsData, '1y'),
     threeYears: computePortfolioReturn(portfolio, symbolsData, '3y')
@@ -527,7 +830,7 @@ function renderPerformanceTable(portfolios, symbolsData) {
     .map(
       (row) => `
       <tr>
-        <td>${row.label}</td>
+        <td>${row.symbol ? `<span data-symbol="${row.symbol}">${row.label}</span>` : row.label}</td>
         <td>${formatPct(row.ytd)}</td>
         <td>${formatPct(row.oneYear)}</td>
         <td>${formatPct(row.threeYears)}</td>
@@ -535,6 +838,7 @@ function renderPerformanceTable(portfolios, symbolsData) {
     `
     )
     .join('');
+  void enrichTickerHover(perfTableBody);
 }
 
 async function resolveComparisonEntry(value) {
@@ -579,6 +883,14 @@ async function compareMixed() {
     symbolsData[symbol] = await getSymbolSeries(symbol);
   }
 
+  const directSymbols = portfolios
+    .filter(
+      (p) =>
+        p.assets.length === 1 && Number(p.assets[0].weight) === 100 && isTickerLabel(p.assets[0].symbol)
+    )
+    .map((p) => p.assets[0].symbol);
+  await Promise.all(directSymbols.map((s) => ensureSymbolName(s)));
+
   const seriesEntries = portfolios.map((portfolio, idx) => ({
     label: portfolio.label,
     color: palette[idx % palette.length],
@@ -615,6 +927,7 @@ async function compareGroupComponents(groupIndex) {
   for (const symbol of symbols) {
     symbolsData[symbol] = await getSymbolSeries(symbol);
   }
+  await Promise.all(symbols.map((s) => ensureSymbolName(s)));
 
   const seriesEntries = portfolios.map((portfolio, idx) => ({
     label: portfolio.label,
@@ -636,66 +949,82 @@ async function compareGroupComponents(groupIndex) {
 }
 
 detectBtn.addEventListener('click', async () => {
-  const { assets, unresolved } = await detectAssetsFromText(input.value);
-  state.assetsDraft = assets;
-  renderAssetsDraft();
-  detectInfo.textContent = `${assets.length} activo(s) detectado(s).`;
-  if (unresolved.length > 0) {
-    detectInfo.textContent += ` No resueltos: ${unresolved.slice(0, 3).join(', ')}${unresolved.length > 3 ? '...' : ''}.`;
-  }
+  await withButtonProcessing(detectBtn, async () => {
+    const { assets, unresolved } = await detectAssetsFromText(input.value);
+    state.assetsDraft = assets;
+    renderAssetsDraft();
+    detectInfo.textContent = `${assets.length} activo(s) detectado(s).`;
+    if (unresolved.length > 0) {
+      detectInfo.textContent += ` No resueltos: ${unresolved.slice(0, 3).join(', ')}${unresolved.length > 3 ? '...' : ''}.`;
+    }
+  });
 });
 
-saveGroupBtn.addEventListener('click', () => {
-  const name = groupName.value.trim();
-  if (!name) {
-    alert('Indica un nombre para el grupo.');
-    return;
-  }
-
-  if (state.assetsDraft.length === 0) {
-    alert('Primero detecta activos en el texto.');
-    return;
-  }
-
-  const validAssets = state.assetsDraft.filter((a) => a.weight > 0);
-  if (validAssets.length === 0) {
-    alert('Asigna al menos un peso mayor a 0.');
-    return;
-  }
-
-  const totalWeight = validAssets.reduce((sum, a) => sum + Number(a.weight), 0);
-  if (totalWeight <= 0) {
-    alert('Los pesos deben sumar más de 0%.');
-    return;
-  }
-
-  const normalizedAssets = validAssets.map((a) => ({
-    symbol: a.symbol,
-    weight: Number(((Number(a.weight) / totalWeight) * 100).toFixed(4))
-  }));
-
-  if (state.editingGroupIndex != null && state.groups[state.editingGroupIndex]) {
-    state.groups[state.editingGroupIndex] = { name, assets: normalizedAssets };
-  } else {
-    const existing = state.groups.findIndex((g) => g.name.toLowerCase() === name.toLowerCase());
-    if (existing >= 0) {
-      state.groups[existing] = { name, assets: normalizedAssets };
-    } else {
-      state.groups.push({ name, assets: normalizedAssets });
+saveGroupBtn.addEventListener('click', async () => {
+  await withButtonProcessing(saveGroupBtn, async () => {
+    const name = groupName.value.trim();
+    if (!name) {
+      alert('Indica un nombre para el grupo.');
+      return;
     }
-  }
 
-  saveLocal('groups', state.groups);
-  renderGroups();
-  resetGroupEditor();
+    if (state.assetsDraft.length === 0) {
+      alert('Primero detecta activos en el texto.');
+      return;
+    }
+
+    const validAssets = state.assetsDraft.filter((a) => a.weight > 0);
+    if (validAssets.length === 0) {
+      alert('Asigna al menos un peso mayor a 0.');
+      return;
+    }
+
+    const totalWeight = validAssets.reduce((sum, a) => sum + Number(a.weight), 0);
+    if (totalWeight <= 0) {
+      alert('Los pesos deben sumar más de 0%.');
+      return;
+    }
+
+    const normalizedAssets = validAssets.map((a) => ({
+      symbol: a.symbol,
+      weight: Number(((Number(a.weight) / totalWeight) * 100).toFixed(4))
+    }));
+
+    if (state.editingGroupIndex != null && state.groups[state.editingGroupIndex]) {
+      state.groups[state.editingGroupIndex] = { name, assets: normalizedAssets };
+    } else {
+      const existing = state.groups.findIndex((g) => g.name.toLowerCase() === name.toLowerCase());
+      if (existing >= 0) {
+        state.groups[existing] = { name, assets: normalizedAssets };
+      } else {
+        state.groups.push({ name, assets: normalizedAssets });
+      }
+    }
+
+    saveLocal('groups', state.groups);
+    renderGroups();
+    resetGroupEditor();
+  });
 });
 
 runCompareBtn.addEventListener('click', async () => {
-  try {
-    await compareMixed();
-  } catch (err) {
-    alert(err.message || 'Error comparando selección');
-  }
+  await withButtonProcessing(runCompareBtn, async () => {
+    try {
+      await compareMixed();
+    } catch (err) {
+      alert(err.message || 'Error comparando selección');
+    }
+  });
+});
+
+clearCompareBtn?.addEventListener('click', async () => {
+  await withButtonProcessing(clearCompareBtn, async () => {
+    compareFields.forEach((field) => {
+      if (field) field.value = '';
+    });
+    state.lastCompare = null;
+    renderYoYMessage('YoY', 'Haz click en una serie de la leyenda para ver Year-over-Year.');
+  });
 });
 
 rangeButtons.addEventListener('click', async (e) => {
@@ -709,18 +1038,20 @@ rangeButtons.addEventListener('click', async (e) => {
 
   if (!state.lastCompare) return;
 
-  try {
-    if (state.lastCompare.type === 'mixed') {
-      compareFields.forEach((field, idx) => {
-        field.value = state.lastCompare.values[idx] || '';
-      });
-      await compareMixed();
-    } else if (state.lastCompare.type === 'group-components') {
-      await compareGroupComponents(state.lastCompare.groupIndex);
+  await withButtonProcessing(btn, async () => {
+    try {
+      if (state.lastCompare.type === 'mixed') {
+        compareFields.forEach((field, idx) => {
+          field.value = state.lastCompare.values[idx] || '';
+        });
+        await compareMixed();
+      } else if (state.lastCompare.type === 'group-components') {
+        await compareGroupComponents(state.lastCompare.groupIndex);
+      }
+    } catch (err) {
+      alert(err.message || 'No se pudo refrescar el rango');
     }
-  } catch (err) {
-    alert(err.message || 'No se pudo refrescar el rango');
-  }
+  });
 });
 
 renderGroups();

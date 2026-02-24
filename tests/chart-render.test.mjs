@@ -33,12 +33,18 @@ function buildHtml() {
     <button id="saveGroupBtn"></button>
     <div id="groupsContainer"></div>
     <button id="runCompareBtn"></button>
+    <button id="clearCompareBtn"></button>
     <input id="compareField1" />
     <input id="compareField2" />
     <input id="compareField3" />
     <input id="compareField4" />
     <datalist id="compareSuggestions"></datalist>
     <table><tbody id="perfTableBody"></tbody></table>
+    <table>
+      <thead><tr><th id="yoyTitle">YoY</th></tr></thead>
+      <tbody id="yoyTableBody"></tbody>
+    </table>
+    <div id="chartLegend"></div>
     <div id="rangeButtons">
       <button data-range="ytd" class="active"></button>
       <button data-range="1y"></button>
@@ -77,12 +83,32 @@ describe('chart rendering flows', () => {
       constructor(_ctx, config) {
         this.data = config.data;
         this.options = config.options;
+        this.plugins = config.plugins || [];
+        this._hidden = {};
         this.updated = 0;
         global.__chartInstance = this;
+        this._runPlugins();
       }
 
       update() {
         this.updated += 1;
+        this._runPlugins();
+      }
+
+      isDatasetVisible(index) {
+        return this._hidden[index] !== true;
+      }
+
+      setDatasetVisibility(index, visible) {
+        this._hidden[index] = !visible;
+      }
+
+      _runPlugins() {
+        this.plugins.forEach((plugin) => {
+          if (typeof plugin?.afterUpdate === 'function') {
+            plugin.afterUpdate(this, {}, this.options?.plugins?.[plugin.id] || {});
+          }
+        });
       }
     };
 
@@ -267,5 +293,93 @@ describe('chart rendering flows', () => {
     const groupText = document.getElementById('groupsContainer').textContent;
     expect(groupText).toContain('AAPL (70%');
     expect(groupText).toContain('NVDA (30%');
+  });
+
+  it('shows YoY table when clicking legend on 5Y range', async () => {
+    document.querySelector('button[data-range="5y"]').click();
+    await tick();
+
+    document.getElementById('compareField1').value = 'AAPL';
+    document.getElementById('compareField2').value = 'MSFT';
+    document.getElementById('runCompareBtn').click();
+    await tick();
+
+    const yoyBtn = document.querySelector('#chartLegend button[data-role="yoy"][data-dataset-index="0"]');
+    expect(yoyBtn).toBeTruthy();
+    yoyBtn.click();
+    await tick();
+
+    expect(document.getElementById('yoyTitle').textContent).toContain('AAPL');
+    expect(document.querySelectorAll('#yoyTableBody tr').length).toBeGreaterThan(0);
+  });
+
+  it('shows YoY unavailable message for non-supported ranges', async () => {
+    document.querySelector('button[data-range="ytd"]').click();
+    await tick();
+
+    document.getElementById('compareField1').value = 'AAPL';
+    document.getElementById('compareField2').value = 'MSFT';
+    document.getElementById('runCompareBtn').click();
+    await tick();
+
+    const yoyBtn = document.querySelector('#chartLegend button[data-role="yoy"][data-dataset-index="0"]');
+    yoyBtn.click();
+    await tick();
+
+    expect(document.getElementById('yoyTableBody').textContent).toContain(
+      'Disponible solo para rangos 3Y, 5Y y 10Y.'
+    );
+  });
+
+  it('keeps standard toggle behavior when clicking ticker name in legend', async () => {
+    document.getElementById('compareField1').value = 'AAPL';
+    document.getElementById('compareField2').value = 'MSFT';
+    document.getElementById('runCompareBtn').click();
+    await tick();
+
+    const toggleBtn = document.querySelector('#chartLegend button[data-role="toggle"][data-dataset-index="0"]');
+    expect(toggleBtn).toBeTruthy();
+    expect(global.__chartInstance.isDatasetVisible(0)).toBe(true);
+
+    toggleBtn.click();
+    await tick();
+    expect(global.__chartInstance.isDatasetVisible(0)).toBe(false);
+
+    toggleBtn.click();
+    await tick();
+    expect(global.__chartInstance.isDatasetVisible(0)).toBe(true);
+  });
+
+  it('fills next comparison field when clicking group name or component', async () => {
+    const rawInput = document.getElementById('rawInput');
+    const detectBtn = document.getElementById('detectBtn');
+    const groupName = document.getElementById('groupName');
+    const saveGroupBtn = document.getElementById('saveGroupBtn');
+
+    rawInput.value = 'AAPL\nNVDA';
+    detectBtn.click();
+    await tick();
+    groupName.value = 'Tech stocks';
+    saveGroupBtn.click();
+
+    const groupNamePick = document.querySelector('[data-pick-value="Tech stocks"]');
+    expect(groupNamePick).toBeTruthy();
+    groupNamePick.click();
+    expect(document.getElementById('compareField1').value).toBe('Tech stocks');
+
+    const symbolPick = document.querySelector('[data-pick-value="AAPL"]');
+    expect(symbolPick).toBeTruthy();
+    symbolPick.click();
+    expect(document.getElementById('compareField2').value).toBe('AAPL');
+  });
+
+  it('clears unified comparison inputs with clear button', async () => {
+    document.getElementById('compareField1').value = 'AAPL';
+    document.getElementById('compareField2').value = 'MSFT';
+    document.getElementById('clearCompareBtn').click();
+    await tick();
+
+    expect(document.getElementById('compareField1').value).toBe('');
+    expect(document.getElementById('compareField2').value).toBe('');
   });
 });

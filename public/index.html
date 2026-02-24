@@ -6,6 +6,8 @@
     <title>Performance Measure Preview</title>
     <link rel="stylesheet" href="/styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
   </head>
   <body>
     <main class="app">
@@ -46,6 +48,7 @@
         </div>
         <div class="row">
           <button id="runCompareBtn" class="primary">Comparar selección</button>
+          <button id="clearCompareBtn">Limpiar selección</button>
         </div>
 
         <div class="range-buttons" id="rangeButtons">
@@ -55,6 +58,8 @@
           <button data-range="5y">Five years</button>
           <button data-range="10y">Ten years</button>
         </div>
+
+        <div id="chartLegend" class="chart-legend"></div>
 
         <div class="chart-wrap">
           <canvas id="chart"></canvas>
@@ -71,6 +76,18 @@
               </tr>
             </thead>
             <tbody id="perfTableBody"></tbody>
+          </table>
+        </div>
+
+        <div class="table-wrap">
+          <table id="yoyTable" class="perf-table">
+            <thead>
+              <tr>
+                <th id="yoyTitle">YoY</th>
+                <th>Retorno</th>
+              </tr>
+            </thead>
+            <tbody id="yoyTableBody"></tbody>
           </table>
         </div>
       </section>

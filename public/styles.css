@@ -146,6 +146,11 @@ label {
   font-size: 0.86rem;
 }
 
+.group-pick {
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
 .pill {
   background: var(--bg-soft);
   border: 1px solid var(--border);
@@ -170,6 +175,49 @@ label {
 .range-buttons button.active {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 8px 0 4px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.legend-main,
+.legend-yoy {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.legend-main.off {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+.legend-yoy {
+  color: var(--accent);
+  font-size: 0.82rem;
+}
+
+.legend-yoy.off {
+  color: var(--muted);
 }
 
 .chart-wrap {
@@ -207,6 +255,11 @@ label {
 .perf-table th {
   color: var(--muted);
   font-weight: 600;
+}
+
+#yoyTableBody td:first-child,
+#yoyTableBody td:last-child {
+  white-space: nowrap;
 }
 
 @media (max-width: 760px) {

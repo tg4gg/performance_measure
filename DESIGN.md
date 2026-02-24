@@ -1,286 +1,211 @@
-# DESIGN.md - Blueprint Completo para Recrear la App Desde Cero
+# DESIGN.md - Especificación Completa para Recrear la App Desde Cero
 
-Este documento define, sin depender de código previo, cómo construir la aplicación completa de comparación de performance de activos y grupos.
+Este documento define todo lo necesario para que cualquier IA pueda reconstruir la app sin acceder al código original.
 
-## 1. Objetivo del producto
+## 1) Objetivo
 
-Construir una app web que permita:
+Construir una web app que permita:
 
-1. Ingresar texto libre/multilínea y resolver cada línea a un símbolo financiero.
-2. Asignar pesos para formar grupos compuestos.
-3. Crear/editar/eliminar grupos.
-4. Comparar en una sola vista hasta 4 selecciones (cada una puede ser ticker o grupo).
-5. Visualizar componentes de un grupo sin límite de cantidad.
-6. Cambiar rango temporal (`YTD`, `1Y`, `3Y`, `5Y`, `10Y`).
-7. Ver un gráfico base 100 y una tabla resumen (`YTD`, `1Y`, `3Y`).
-8. Minimizar llamadas externas mediante caché local (cliente y servidor).
+1. Resolver texto libre a activos financieros.
+2. Crear grupos ponderados de activos.
+3. Comparar tickers y/o grupos en un gráfico interactivo.
+4. Analizar resumen de performance y YoY por serie.
+5. Minimizar llamadas externas con cachés locales.
 
-## 2. Requisitos funcionales
+## 2) Funcionalidades obligatorias
 
-### 2.1 Entrada de texto y parsing
+### 2.1 Entrada multilinea y pesos
 
-- Campo multilinea para pegar texto.
-- Cada línea puede ser:
+- Campo textarea para pegar líneas.
+- Cada línea soporta:
   - `valor`
   - `valor, peso`
   - `valor; peso`
   - `valor | peso`
   - `valor 25%`
-- `valor` puede ser:
-  - ticker (`AAPL`, `BRK-B`, `GC=F`)
-  - nombre aproximado (`microsoft corporation`, `exxon`)
+- `valor` puede ser ticker o nombre de activo.
 
-### 2.2 Detección y resolución de símbolos
+Reglas de pesos del draft:
+- Sin pesos explícitos: reparto equitativo al 100%.
+- Con pesos mixtos: pesos explícitos + reparto del remanente entre implícitos.
 
-Proceso recomendado por línea:
+### 2.2 Resolución de símbolos
 
-1. Resolver con alias local conocidos.
-2. Intentar parse ticker directo solo si no es frase (evitar falsos positivos tipo `MICRO` en `microsoft corporation`).
-3. Si falla, llamar endpoint backend `/api/resolve?query=...`.
-4. Guardar resolución en caché local (cliente + servidor).
+Orden de resolución:
+1. Alias local.
+2. Ticker directo (solo si no es frase multi-palabra para evitar falsos positivos).
+3. Backend `/api/resolve?query=...`.
 
-### 2.3 Grupos
+Cachés:
+- Cliente: `resolveCache`, `symbolNames` en localStorage.
+- Servidor: `resolve-cache.json` con TTL (30 días recomendado).
 
-- Crear grupo con nombre + lista de activos ponderados.
-- Normalizar pesos al guardar (sumar 100%).
-- Editar grupo:
-  - cargar nombre
-  - cargar componentes en draft
-  - poblar textarea como `TICKER, PESO` por línea
+### 2.3 Gestión de grupos
+
+- Crear grupo.
+- Editar grupo.
+  - Debe rellenar textarea como `TICKER, PESO` por línea.
 - Eliminar grupo.
+- Ver componentes del grupo (sin límite de activos).
 
-### 2.4 Comparación unificada
+### 2.4 Interacciones rápidas desde grupos
 
-- 4 campos de entrada (`campo1..campo4`), mínimo 2 no vacíos.
+- Click en nombre de grupo => autocompleta el siguiente campo vacío en comparación.
+- Click en ticker componente => autocompleta el siguiente campo vacío en comparación.
+- Si no hay campos vacíos, sobrescribir el primer campo.
+
+### 2.5 Comparación unificada
+
+- 4 campos (`campo1..campo4`), mínimo 2 no vacíos.
 - Cada campo acepta:
-  - ticker/nombre resoluble
+  - ticker
   - nombre exacto de grupo
-- Límite máximo: 4 elementos en esta vista.
-
-### 2.5 Visualización de componentes
-
-- Cada grupo tiene botón `Ver componentes`.
-- Debe graficar todos los activos del grupo (sin límite).
+- Botones:
+  - `Comparar selección`
+  - `Limpiar selección`
 
 ### 2.6 Rango temporal
 
-Botones: `YTD`, `1Y`, `3Y`, `5Y`, `10Y`.
+- Botones: `YTD`, `1Y`, `3Y`, `5Y`, `10Y`.
+- Al cambiar rango se debe recalcular la vista activa:
+  - comparación unificada o
+  - vista de componentes de grupo.
 
-- Deben recalcular la vista activa actual:
-  - comparación unificada
-  - o vista de componentes del grupo
+### 2.7 Gráfico y leyenda
 
-### 2.7 Gráfico y tabla
+- Chart.js line chart base 100.
+- Zoom habilitado (wheel/drag/pinch).
+- Pan deshabilitado para evitar desplazamiento lateral involuntario.
+- Leyenda custom HTML (no la nativa):
+  - click en nombre de serie => toggle visible/oculta (comportamiento estándar)
+  - click en `(YoY)` => mostrar YoY de esa serie
 
-- Gráfico lineal interactivo.
-- Serie normalizada base 100.
-- Tabla por selección con columnas:
-  - `YTD`
-  - `1Y`
-  - `3Y`
+### 2.8 Tabla de resumen y tabla YoY
 
-## 3. Requisitos no funcionales
+Tabla resumen (siempre tras comparar):
+- columnas: `Selección`, `YTD`, `1Y`, `3Y`
 
-- Evitar sobrecarga de APIs externas:
-  - usar caché persistente servidor
-  - usar caché de resolución cliente/servidor
-- Evitar error de cuota de navegador:
-  - no persistir series históricas grandes en `localStorage`
-- UI responsive (desktop/móvil).
-- Mensajes de error explícitos y accionables.
+Tabla YoY:
+- se llena al click en `(YoY)` de la leyenda
+- solo aplica a rangos `3Y`, `5Y`, `10Y`
+- en `YTD` o `1Y`: mostrar mensaje de no disponibilidad
 
-## 4. Arquitectura
+### 2.9 Hover con nombre largo
 
-## 4.1 Backend (Node + Express)
+Cuando se hace hover sobre ticker en:
+- lista draft,
+- sección de grupos,
+- tabla de resumen,
+- tooltip del gráfico,
 
-Endpoints obligatorios:
+mostrar nombre largo del activo.
 
+Si no está cacheado:
+- mostrar estado de resolución y
+- resolver en background al hover.
+
+### 2.10 Feedback de procesamiento
+
+Todo botón con acción debe mostrar temporalmente `Procesando...`:
+- detectar,
+- guardar/actualizar,
+- comparar,
+- limpiar,
+- botones de rango,
+- acciones de grupos.
+
+## 3) Backend requerido (Node + Express)
+
+Endpoints:
 1. `GET /api/performance?symbol=...`
 2. `GET /api/performance/batch?symbols=a,b,c`
 3. `GET /api/resolve?query=...`
 
-### 4.1.1 Fuente de datos
+Datos:
+- Yahoo chart endpoint para histórico.
+- Yahoo search endpoint para resolución de texto.
 
-- Yahoo Chart endpoint:
-  - `https://query1.finance.yahoo.com/v8/finance/chart/{symbol}`
-- Yahoo Search endpoint:
-  - `https://query2.finance.yahoo.com/v1/finance/search?q={query}`
+Caché mercado:
+- archivo por símbolo en `.cache/market-data`.
+- actualización incremental (pedir solo faltantes).
 
-### 4.1.2 Caché de mercado
+Caché resolución:
+- `.cache/resolve-cache.json`.
 
-- Archivo por símbolo en `.cache/market-data/{symbol}.json`
-- Primera carga: histórico completo.
-- Cargas siguientes: pedir solo fechas faltantes desde último día cacheado.
-
-### 4.1.3 Caché de resolución
-
-- Archivo `.cache/resolve-cache.json`
-- Clave: query normalizada (uppercase + espacios normalizados)
-- Valor: símbolo, nombre, timestamp
-- TTL sugerido: 30 días
-
-### 4.1.4 Alias locales mínimos
-
-Definir diccionario para casos comunes:
-
-- `EXXON` -> `XOM`
-- `EXXON MOBIL` -> `XOM`
-- `BRKS` -> `AZTA`
-- `BERKSHIRE` -> `BRK-B`
-- `BERKSHIRE HATHAWAY` -> `BRK-B`
-- `SP500`/`S&P 500` -> `^GSPC`
-- `NASDAQ` -> `^IXIC`
-- `ORO`/`GOLD` -> `GC=F`
-- `PLATA`/`SILVER` -> `SI=F`
-
-## 4.2 Frontend (Vanilla JS)
+## 4) Frontend requerido (Vanilla)
 
 Estado mínimo:
-
 - `groups`
 - `assetsDraft`
-- `marketCache` (en memoria, no localStorage)
+- `marketCache` (solo memoria)
 - `resolveCache` (localStorage)
+- `symbolNames` (localStorage)
 - `activeRange`
 - `lastCompare`
 - `editingGroupIndex`
 
-Persistencia cliente:
+Persistencia:
+- guardar `groups`, `resolveCache`, `symbolNames`
+- nunca persistir series históricas grandes en localStorage
 
-- Guardar `groups`, `resolveCache`.
-- Eliminar/ignorar `marketCache` persistente para evitar quota overflow.
+## 5) Algoritmos clave
 
-## 5. Algoritmos
+### 5.1 Serie compuesta
 
-### 5.1 Asignación de pesos del draft
+Para un portafolio ponderado:
+1. filtrar por rango
+2. normalizar cada activo a base 100
+3. unir fechas
+4. forward-fill por activo desde su inicio
+5. promedio ponderado por peso activo
+6. rebase final a 100 en primer punto
 
-Al detectar líneas:
+### 5.2 Alineación multi-serie
 
-- Si ninguna línea trae peso: repartir 100% equitativo.
-- Si algunas traen peso:
-  - sumar explícitos
-  - repartir remanente entre implícitos
-  - si no hay implícitos, usar explícitos tal cual
+- unir fechas de todas las series
+- para cada serie:
+  - `null` antes de su inicio
+  - forward-fill después
 
-### 5.2 Serie compuesta de portafolio
+### 5.3 YoY
 
-Entrada: `assets[{symbol,weight}]`, `symbolsData`, `range`.
+- tomar valores de cierre de cada año (o último punto disponible del año en la serie)
+- calcular `(año_actual / año_previo - 1) * 100`
+- renderizar por fila `Año`, `Retorno`
 
-Pasos:
+## 6) UX / Mensajes
 
-1. Recortar cada símbolo al rango.
-2. Para cada símbolo, calcular valor normalizado diario `close/baseClose * 100`.
-3. Unir por todas las fechas disponibles.
-4. Usar último valor conocido por símbolo (forward-fill desde inicio de ese símbolo).
-5. Calcular promedio ponderado con peso activo disponible del día.
-6. Rebasar resultado final a 100 en su primer punto.
+Mensajes explícitos para:
+- símbolo no resoluble
+- ticker reconocido sin datos
+- menos de 2 elementos en comparación
+- YoY no disponible en rango actual
 
-### 5.3 Alineación para gráfico multi-serie
+## 7) Testing mínimo
 
-- Unir todas las fechas de todas las series.
-- Por serie:
-  - `null` antes del primer dato
-  - luego forward-fill entre fechas faltantes
+Pruebas automatizadas (Vitest + JSDOM) deben cubrir:
+1. comparación mixta grupo+ticker
+2. 5Y no truncado por activo con historia corta
+3. ver componentes sin límite
+4. resolución de texto libre (`EXXON -> XOM`)
+5. parsing de segunda columna de pesos
+6. tabla resumen con filas correctas
+7. click `(YoY)` en 5Y muestra datos
+8. click `(YoY)` en YTD muestra mensaje de no disponible
+9. click nombre de serie en leyenda hace toggle visible/oculta
+10. click en grupo/componente rellena siguiente campo en comparación
+11. botón limpiar selección vacía inputs
 
-## 6. UX y mensajes
+## 8) Criterios de aceptación
 
-Mensajes claros para errores:
+La app cumple si:
+- soporta flujo end-to-end de creación/edición/uso de grupos
+- compara hasta 4 selecciones mixtas
+- muestra componentes ilimitados
+- ofrece tabla resumen + YoY por serie
+- mantiene zoom usable sin pan involuntario
+- muestra nombres largos al hover
+- evita `localStorage quota exceeded`
+- tests en verde
 
-- No resoluble: `No se pudo resolver "X". Usa ticker válido o nombre exacto de grupo.`
-- Resuelto pero sin data: `Ticker "X" reconocido, pero sin datos de mercado (...)`.
-- Menos de 2 selecciones en comparador: `Ingresa al menos 2 elementos para comparar.`
-
-## 7. Interfaz requerida
-
-Secciones:
-
-1. **Texto libre / multilínea**
-  - textarea
-  - botón detectar
-  - listado draft ticker/peso editable
-
-2. **Grupos**
-  - input nombre
-  - botón guardar/actualizar
-  - listado de grupos con botones:
-    - `Ver componentes`
-    - `Editar`
-    - `Eliminar`
-
-3. **Comparación**
-  - 4 inputs unificados con datalist de grupos
-  - botón comparar
-  - botones de rango
-  - gráfico
-  - tabla resumen YTD/1Y/3Y
-
-## 8. Contratos API sugeridos
-
-### `GET /api/resolve?query=exxon`
-
-```json
-{
-  "query": "exxon",
-  "symbol": "XOM",
-  "name": "Exxon Mobil Corporation",
-  "source": "local-alias|resolve-cache|yahoo-search"
-}
-```
-
-### `GET /api/performance?symbol=AAPL`
-
-```json
-{
-  "symbol": "AAPL",
-  "provider": "yahoo-chart",
-  "lastUpdated": "2026-...",
-  "points": [
-    { "date": "2026-01-02", "close": 243.1 }
-  ]
-}
-```
-
-## 9. Testing mínimo obligatorio
-
-Implementar tests automatizados de frontend (Vitest + JSDOM) para validar:
-
-1. Comparación unificada con mezcla grupo+ticker.
-2. Rango 5Y no truncado por activo con histórico corto.
-3. `Ver componentes` muestra todos los activos (sin cap).
-4. Resolución de texto libre (`EXXON` -> `XOM`).
-5. Parsing de segunda columna de peso (`AAPL, 70`).
-6. Tabla resumen renderiza filas según selecciones.
-
-## 10. Scripts de proyecto
-
-`package.json` debe incluir:
-
-- `start`: levantar servidor
-- `dev`: levantar servidor
-- `test`: ejecutar vitest
-
-## 11. Criterios de aceptación
-
-La app se considera correcta si:
-
-1. Usuario puede construir/editar grupos desde texto multilinea con o sin pesos.
-2. Comparador unificado acepta ticker o grupo en cada uno de 4 campos.
-3. `Ver componentes` grafica todos los subyacentes del grupo.
-4. Cambiar rango actualiza la vista activa.
-5. Tabla muestra YTD/1Y/3Y por selección.
-6. No aparece error de `localStorage quota exceeded` al cargar muchos símbolos.
-7. Tests pasan en verde.
-
-## 12. Recomendaciones de implementación para IA
-
-Si una IA recrea esto desde cero:
-
-1. Construir primero backend y contratos de API.
-2. Implementar caché de mercado incremental.
-3. Implementar resolver con caché y alias.
-4. Luego construir UI de grupos y comparación.
-5. Añadir tabla resumen.
-6. Añadir tests de integración UI.
-7. Optimizar errores y edge cases al final.
-
-Este documento es suficiente para reconstruir la app funcional completa sin acceder al repositorio original.
+Este documento, por sí solo, debe permitir reconstruir la app completa.

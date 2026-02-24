@@ -1,49 +1,59 @@
 # Performance Measure
 
-Aplicación web para comparar performance de activos financieros (stocks, ETFs, índices, commodities, crypto) y grupos compuestos por pesos.
+Aplicación web para comparar performance de activos financieros (acciones, ETFs, índices, commodities y cripto), crear grupos ponderados y analizar retornos en gráfico interactivo.
 
-## Qué hace
+## Features principales
 
-- Pega texto libre/multilínea para detectar activos.
-- Soporta asignación de pesos en segunda columna por línea (ej: `AAPL, 60`).
-- Crea, edita y elimina grupos de activos ponderados.
-- Compara hasta 4 elementos en un selector unificado:
-  - ticker directo
-  - nombre exacto de grupo creado
-- Botones de rango: `YTD`, `1Y`, `3Y`, `5Y`, `10Y`.
-- Gráfico interactivo de performance base 100.
+- Detección de activos desde texto libre/multilínea.
+- Segunda columna opcional en textarea para pesos por línea:
+  - `AAPL, 60`
+  - `NVDA; 40`
+  - `MSFT 25%`
+- Resolución automática de texto a ticker (alias + búsqueda remota con caché).
+- CRUD de grupos (crear, editar, eliminar).
+- Click sobre nombre de grupo o componente para autocompletar el siguiente campo vacío de comparación.
+- Comparación unificada de hasta 4 selecciones (cada una ticker o grupo).
+- Botón `Limpiar selección` en comparación.
+- Rangos: `YTD`, `1Y`, `3Y`, `5Y`, `10Y`.
+- Gráfico Chart.js con zoom (wheel/drag/pinch) y sin pan lateral.
+- Leyenda HTML custom:
+  - click en ticker => mostrar/ocultar serie
+  - click en `(YoY)` => tabla Year-over-Year (solo en 3Y/5Y/10Y)
 - Tabla de resumen por selección con `YTD`, `1Y`, `3Y`.
-- Acción `Ver componentes` para graficar todos los activos subyacentes de un grupo.
-- Resolución automática de texto a símbolo con caché local.
-- Caché de datos de mercado en servidor (disco), incremental.
+- Tabla YoY por serie seleccionada desde la leyenda.
+- `Ver componentes` de grupo sin límite de activos.
+- Tooltips de nombre largo al hover en tickers (grupos, draft, tabla y tooltip del gráfico).
+- Feedback visual de `Procesando...` en botones durante acciones.
 
 ## Stack
 
 - Backend: Node.js + Express
-- Frontend: HTML/CSS/JS (vanilla)
-- Charting: Chart.js (CDN)
+- Frontend: HTML/CSS/JS vanilla
+- Charts: Chart.js + chartjs-plugin-zoom + hammerjs
 - Tests: Vitest + JSDOM
 
 ## Estructura
 
-- `server.js`: API y caché de mercado/resolución
-- `public/index.html`: interfaz
-- `public/styles.css`: estilos
-- `public/app.js`: lógica cliente
-- `tests/chart-render.test.mjs`: tests de flujos clave
+- `server.js` API + caché de mercado + resolución
+- `public/index.html` UI
+- `public/styles.css` estilos
+- `public/app.js` lógica cliente
+- `tests/chart-render.test.mjs` pruebas
+- `README.md` guía de uso
+- `DESIGN.md` especificación completa de recreación
 
 ## Requisitos
 
 - Node.js 18+
 - npm
 
-## Instalar
+## Instalación
 
 ```bash
 npm install
 ```
 
-## Ejecutar
+## Ejecución
 
 ```bash
 npm start
@@ -51,42 +61,23 @@ npm start
 
 Abrir: `http://localhost:3000`
 
-## Desarrollo
-
-```bash
-npm run dev
-```
-
 ## Tests
 
 ```bash
 npm test
 ```
 
-## Formato de entrada recomendado (textarea)
-
-- Solo activo:
-  - `AAPL`
-  - `Exxon`
-  - `S&P 500`
-- Activo + peso:
-  - `AAPL, 50`
-  - `NVDA; 30`
-  - `GLD | 20`
-  - `MSFT 25%`
-
 ## Caching
 
-- Servidor:
-  - Mercado: `.cache/market-data/*.json`
-  - Resolución texto->ticker: `.cache/resolve-cache.json` (TTL 30 días)
-- Cliente:
-  - `groups` y `resolveCache` en `localStorage`
-  - `marketCache` solo en memoria para evitar quota overflow del navegador
+Servidor:
+- Mercado incremental: `.cache/market-data/*.json`
+- Resolución texto->ticker: `.cache/resolve-cache.json` (TTL 30 días)
+
+Cliente:
+- `groups`, `resolveCache`, `symbolNames` en `localStorage`
+- `marketCache` solo en memoria (evita error de cuota del navegador)
 
 ## Notas
 
-- La app usa Yahoo Finance Chart/Search endpoints.
-- Algunas entradas son alias conocidos (`EXXON -> XOM`, `BRKS -> AZTA`, etc.).
-- `Ver componentes` no limita cantidad de activos.
-- El selector unificado sí mantiene máximo 4 elementos por comparación.
+- Fuente de datos: Yahoo Finance Chart/Search endpoints.
+- Alias incluidos para casos frecuentes (`EXXON -> XOM`, `BRKS -> AZTA`, etc.).
