@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Performance Measure Preview</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </head>
+  <body>
+    <main class="app">
+      <header class="hero">
+        <h1>Performance Measure</h1>
+        <p>Pega texto libre, detecta activos, arma grupos ponderados y compara performance.</p>
+      </header>
+
+      <section class="panel">
+        <h2>1) Texto libre / multilínea</h2>
+        <textarea id="rawInput" rows="6" placeholder="Ejemplo:\nApple\noro\nS&P 500\nNasdaq"></textarea>
+        <div class="row">
+          <button id="detectBtn" class="primary">Detectar activos</button>
+          <span id="detectInfo" class="muted"></span>
+        </div>
+        <div id="assetsContainer" class="assets"></div>
+      </section>
+
+      <section class="panel">
+        <h2>2) Crear grupo compuesto</h2>
+        <div class="row">
+          <input id="groupName" type="text" placeholder="Nombre del grupo (ej. Materias Primas)" />
+          <button id="saveGroupBtn">Guardar grupo</button>
+        </div>
+        <div id="groupsContainer" class="groups"></div>
+      </section>
+
+      <section class="panel">
+        <h2>3) Comparación</h2>
+        <h3>Selector único (máximo 4)</h3>
+        <p class="muted">Cada campo acepta ticker (AAPL, GLD, URA) o nombre exacto de grupo creado.</p>
+        <datalist id="compareSuggestions"></datalist>
+        <div class="compare-grid">
+          <input id="compareField1" list="compareSuggestions" placeholder="Campo 1: ticker o grupo" />
+          <input id="compareField2" list="compareSuggestions" placeholder="Campo 2: ticker o grupo" />
+          <input id="compareField3" list="compareSuggestions" placeholder="Campo 3: ticker o grupo (opcional)" />
+          <input id="compareField4" list="compareSuggestions" placeholder="Campo 4: ticker o grupo (opcional)" />
+        </div>
+        <div class="row">
+          <button id="runCompareBtn" class="primary">Comparar selección</button>
+        </div>
+
+        <div class="range-buttons" id="rangeButtons">
+          <button data-range="ytd" class="active">Year to date</button>
+          <button data-range="1y">One year</button>
+          <button data-range="3y">Three years</button>
+          <button data-range="5y">Five years</button>
+          <button data-range="10y">Ten years</button>
+        </div>
+
+        <div class="chart-wrap">
+          <canvas id="chart"></canvas>
+        </div>
+
+        <div class="table-wrap">
+          <table id="perfTable" class="perf-table">
+            <thead>
+              <tr>
+                <th>Selección</th>
+                <th>YTD</th>
+                <th>1Y</th>
+                <th>3Y</th>
+              </tr>
+            </thead>
+            <tbody id="perfTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

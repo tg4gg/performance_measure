@@ -1,0 +1,19 @@
+{
+  "name": "performance-measure",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Preview app para resolver texto a assets y comparar performance individual o por grupos",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "jsdom": "^28.1.0",
+    "vitest": "^4.0.18"
+  }
+}
