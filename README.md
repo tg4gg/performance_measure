@@ -1,29 +1,63 @@
 # Performance Measure
 
-Aplicación web para comparar performance de activos financieros (acciones, ETFs, índices, commodities y cripto), crear grupos ponderados y analizar retornos en gráfico interactivo.
+Web app para analizar performance de activos financieros en dos modos paralelos:
+
+- `Performance measure` (PM): detección desde texto libre, grupos ponderados y comparación base 100.
+- `My performance measure` (MPM): holdings reales con `purchasePrice`, `units`, `buyDate`, `sellDate` opcional, portfolios y subsets anidados.
 
 ## Features principales
 
-- Detección de activos desde texto libre/multilínea.
-- Segunda columna opcional en textarea para pesos por línea:
+- Cambio seamless entre PM y MPM desde la misma UI.
+- Comparación con 1 a 4 selecciones.
+- Resolución de identificadores por:
+  - ticker
+  - alias local
+  - WKN
+  - ISIN
+  - texto libre
+- Fallback de resolución:
+  - Yahoo Finance Search
+  - OpenFIGI para WKN/ISIN cuando Yahoo no devuelve match directo
+- Caché local de resolución de símbolos.
+- Chart.js con zoom y leyenda HTML custom.
+- Tabla resumen con `YTD`, `1Y`, `3Y`.
+- Tabla YoY por serie en rangos `3Y`, `5Y`, `10Y`.
+
+## Modo PM
+
+- Detección de activos desde texto libre o multilínea.
+- Pesos opcionales por línea:
   - `AAPL, 60`
   - `NVDA; 40`
   - `MSFT 25%`
-- Resolución automática de texto a ticker (alias + búsqueda remota con caché).
-- CRUD de grupos (crear, editar, eliminar).
-- Click sobre nombre de grupo o componente para autocompletar el siguiente campo vacío de comparación.
-- Comparación unificada de hasta 4 selecciones (cada una ticker o grupo).
-- Botón `Limpiar selección` en comparación.
-- Rangos: `YTD`, `1Y`, `3Y`, `5Y`, `10Y`.
-- Gráfico Chart.js con zoom (wheel/drag/pinch) y sin pan lateral.
-- Leyenda HTML custom:
-  - click en ticker => mostrar/ocultar serie
-  - click en `(YoY)` => tabla Year-over-Year (solo en 3Y/5Y/10Y)
-- Tabla de resumen por selección con `YTD`, `1Y`, `3Y`.
-- Tabla YoY por serie seleccionada desde la leyenda.
-- `Ver componentes` de grupo sin límite de activos.
-- Tooltips de nombre largo al hover en tickers (grupos, draft, tabla y tooltip del gráfico).
-- Feedback visual de `Procesando...` en botones durante acciones.
+- CRUD de grupos ponderados.
+- Comparación entre tickers y/o grupos.
+- `Ver componentes` para desplegar series subyacentes del grupo.
+
+## Modo MPM
+
+- Holdings con campos:
+  - `symbol`
+  - `purchasePrice` opcional
+  - `units` opcional
+  - `buyDate` opcional
+  - `sellDate` opcional
+- Portfolios con holdings directos y subsets reutilizables.
+- Comparación entre:
+  - portfolios
+  - subsets
+  - stocks directos
+- `buyDate` define cuándo entra una posición al cálculo.
+- `sellDate` congela la posición desde la fecha de venta.
+- Los portfolios ponderan por costo base (`purchasePrice * units`, o fallback al primer precio disponible si falta).
+
+## Ejemplos de entrada MPM
+
+```text
+AAPL, 182.4, 12, buyDate=2025-01-10
+MSFT, price=420, units=6
+NVDA, price=610, units=4, buyDate=2025-02-01, sell=2025-09-20
+```
 
 ## Stack
 
@@ -34,13 +68,14 @@ Aplicación web para comparar performance de activos financieros (acciones, ETFs
 
 ## Estructura
 
-- `server.js` API + caché de mercado + resolución
-- `public/index.html` UI
-- `public/styles.css` estilos
-- `public/app.js` lógica cliente
-- `tests/chart-render.test.mjs` pruebas
-- `README.md` guía de uso
-- `DESIGN.md` especificación completa de recreación
+- `server.js`: API, resolución de símbolos, fallback OpenFIGI, caché de mercado
+- `public/index.html`: shell UI con switch PM / MPM
+- `public/styles.css`: estilos
+- `public/app.js`: lógica cliente
+- `tests/chart-render.test.mjs`: tests frontend
+- `tests/server-resolve.test.mjs`: tests de fallback WKN/ISIN en backend
+- `README.md`: guía de uso
+- `DESIGN.md`: especificación funcional
 
 ## Requisitos
 
@@ -67,6 +102,18 @@ Abrir: `http://localhost:3000`
 npm test
 ```
 
+## Resolución de símbolos
+
+Orden general:
+1. Alias local
+2. Ticker directo
+3. Yahoo Finance Search
+4. OpenFIGI para inputs tipo WKN/ISIN cuando Yahoo no resuelve
+
+Notas:
+- Los WKN/ISIN no se truncan a pseudo-tickers locales.
+- La salida de OpenFIGI se normaliza a un símbolo utilizable por Yahoo Finance antes de aceptarse.
+
 ## Caching
 
 Servidor:
@@ -74,10 +121,10 @@ Servidor:
 - Resolución texto->ticker: `.cache/resolve-cache.json` (TTL 30 días)
 
 Cliente:
-- `groups`, `resolveCache`, `symbolNames` en `localStorage`
-- `marketCache` solo en memoria (evita error de cuota del navegador)
+- `groups`, `mpmPortfolios`, `resolveCache`, `symbolNames`, `activeMode` en `localStorage`
+- `marketCache` solo en memoria
 
-## Notas
+## Release
 
-- Fuente de datos: Yahoo Finance Chart/Search endpoints.
-- Alias incluidos para casos frecuentes (`EXXON -> XOM`, `BRKS -> AZTA`, etc.).
+- Rama de desarrollo: `portfolio_tracking`
+- Release solicitado: `v0.1`

@@ -9,6 +9,59 @@ const RESOLVE_CACHE_FILE = path.join(__dirname, '.cache', 'resolve-cache.json');
 const ONE_DAY = 24 * 60 * 60;
 const RESOLVE_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const EXCHANGE_SUFFIX_FALLBACKS = ['.L', '.MI', '.AS', '.PA', '.DE', '.SW', '.MC', '.BR', '.TO'];
+const OPENFIGI_API_URL = 'https://api.openfigi.com/v3/mapping';
+const OPENFIGI_EXCH_TO_YAHOO_SUFFIX = {
+  SW: '.SW',
+  LN: '.L',
+  IM: '.MI',
+  NA: '.AS',
+  FP: '.PA',
+  SM: '.MC',
+  BB: '.BR',
+  CN: '.TO',
+  JT: '.T',
+  HK: '.HK',
+  AU: '.AX',
+  GR: '.DE',
+  GF: '.DE',
+  GD: '.DE',
+  GY: '.DE',
+  GS: '.DE',
+  GM: '.DE',
+  GH: '.DE',
+  GI: '.DE'
+};
+const OPENFIGI_PRIMARY_EXCH_PRIORITY = [
+  'US',
+  'UN',
+  'UA',
+  'UC',
+  'UP',
+  'UB',
+  'UT',
+  'UM',
+  'UX',
+  'UD',
+  'UF',
+  'UW',
+  'OC',
+  'OD',
+  'PW',
+  'SW',
+  'LN',
+  'IM',
+  'NA',
+  'FP',
+  'SM',
+  'GR',
+  'GF',
+  'GD',
+  'GY',
+  'GS',
+  'GM',
+  'GH',
+  'GI'
+];
 
 const SYMBOL_OVERRIDES = {
   'EXXON': 'XOM',
@@ -70,6 +123,14 @@ const SYMBOL_OVERRIDES = {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+function isWknLike(input) {
+  return /^[A-Z0-9]{6}$/i.test(String(input || '').trim());
+}
+
+function isIsinLike(input) {
+  return /^[A-Z]{2}[A-Z0-9]{9}\d$/i.test(String(input || '').trim());
+}
+
 function normalizeSymbol(input) {
   const raw = (input || '').trim();
   if (!raw) return '';
@@ -81,6 +142,8 @@ function normalizeSymbol(input) {
   if (SYMBOL_OVERRIDES[cleaned]) return SYMBOL_OVERRIDES[cleaned];
 
   if (cleaned.includes(' ')) return '';
+  if (/^[A-Z0-9]{6}$/.test(cleaned)) return '';
+  if (/^[A-Z]{2}[A-Z0-9]{9}\d$/.test(cleaned)) return '';
 
   // Preserve explicit exchange-qualified symbols provided by user.
   if (/^\^?[A-Z]{1,6}\.[A-Z]{1,5}$/.test(cleaned)) return cleaned;
@@ -127,6 +190,94 @@ async function writeResolveCache(cache) {
   await fs.writeFile(RESOLVE_CACHE_FILE, JSON.stringify(cache), 'utf8');
 }
 
+function normalizeTickerForYahoo(ticker) {
+  const raw = String(ticker || '').trim().toUpperCase();
+  if (!raw) return '';
+  return raw.replace(/\s+/g, '').replace(/\//g, '-').replace(/\*/g, '');
+}
+
+function scoreOpenFigiEntry(entry) {
+  const exch = String(entry?.exchCode || '').toUpperCase();
+  const priority = OPENFIGI_PRIMARY_EXCH_PRIORITY.indexOf(exch);
+  return priority === -1 ? 999 : priority;
+}
+
+function buildOpenFigiYahooCandidates(entries) {
+  const candidates = [];
+
+  const sorted = [...entries].sort((a, b) => scoreOpenFigiEntry(a) - scoreOpenFigiEntry(b));
+  for (const entry of sorted) {
+    const base = normalizeTickerForYahoo(entry?.ticker);
+    if (!base) continue;
+
+    candidates.push(base);
+
+    const suffix = OPENFIGI_EXCH_TO_YAHOO_SUFFIX[String(entry?.exchCode || '').toUpperCase()];
+    if (suffix) {
+      candidates.push(`${base}${suffix}`);
+    }
+
+    if (/^[A-Z0-9]{1,6}$/.test(base)) {
+      for (const fallback of EXCHANGE_SUFFIX_FALLBACKS) {
+        candidates.push(`${base}${fallback}`);
+      }
+    }
+  }
+
+  return [...new Set(candidates)];
+}
+
+async function hasYahooChartData(symbol) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const fromSec = nowSec - (ONE_DAY * 45);
+  try {
+    const points = await fetchYahooRange(symbol, fromSec, nowSec + ONE_DAY);
+    return Array.isArray(points) && points.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveByOpenFigi(query) {
+  const q = String(query || '').trim().toUpperCase();
+  if (!q) return null;
+
+  const idType = isIsinLike(q) ? 'ID_ISIN' : isWknLike(q) ? 'ID_WERTPAPIER' : '';
+  if (!idType) return null;
+
+  const res = await fetch(OPENFIGI_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'performance-measure-preview/1.0'
+    },
+    body: JSON.stringify([{ idType, idValue: q }])
+  });
+
+  if (!res.ok) {
+    throw new Error(`OpenFIGI devolvió ${res.status}`);
+  }
+
+  const payload = await res.json();
+  const matches = Array.isArray(payload?.[0]?.data) ? payload[0].data : [];
+  if (matches.length === 0) return null;
+
+  const candidates = buildOpenFigiYahooCandidates(matches);
+  const primaryName = matches[0]?.name || null;
+
+  for (const candidate of candidates) {
+    if (await hasYahooChartData(candidate)) {
+      return {
+        symbol: candidate,
+        source: 'openfigi',
+        name: primaryName
+      };
+    }
+  }
+
+  return null;
+}
+
 async function resolveBySearch(query) {
   const q = (query || '').trim();
   if (!q) return null;
@@ -168,21 +319,38 @@ async function resolveBySearch(query) {
     (item) => item?.symbol && allowedTypes.has(String(item.quoteType || '').toUpperCase())
   );
 
-  if (!candidate) {
+  if (candidate) {
+    cache[normalizedKey] = {
+      symbol: candidate.symbol,
+      name: candidate.shortname || candidate.longname || '',
+      ts: Date.now()
+    };
+    await writeResolveCache(cache);
+
+    return {
+      symbol: candidate.symbol,
+      source: 'yahoo-search',
+      name: candidate.shortname || candidate.longname || null
+    };
+  }
+
+  const figiResolved = await resolveByOpenFigi(q);
+  if (!figiResolved) {
     return null;
   }
 
   cache[normalizedKey] = {
-    symbol: candidate.symbol,
-    name: candidate.shortname || candidate.longname || '',
+    symbol: figiResolved.symbol,
+    name: figiResolved.name || '',
+    source: figiResolved.source,
     ts: Date.now()
   };
   await writeResolveCache(cache);
 
   return {
-    symbol: candidate.symbol,
-    source: 'yahoo-search',
-    name: candidate.shortname || candidate.longname || null
+    symbol: figiResolved.symbol,
+    source: figiResolved.source,
+    name: figiResolved.name || null
   };
 }
 
@@ -407,6 +575,17 @@ app.get('/api/performance/batch', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Preview lista en http://localhost:${PORT}`);
-});
+function startServer(port = PORT) {
+  return app.listen(port, () => {
+    console.log(`Preview lista en http://localhost:${port}`);
+  });
+}
+
+if (require.main === module) {
+  startServer(PORT);
+}
+
+module.exports = {
+  app,
+  startServer
+};

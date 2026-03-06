@@ -24,18 +24,35 @@ const mockSeries = {
   SLVR: makeYearlyPoints(2025, [100, 104]),
   MSFT: makeYearlyPoints(2021, [100, 109, 121, 132, 145, 156]),
   EQQQ: makeYearlyPoints(2021, [100, 104, 112, 125, 136, 148]),
-  'EQQQ.L': makeYearlyPoints(2021, [100, 104, 112, 125, 136, 148])
+  'EQQQ.L': makeYearlyPoints(2021, [100, 104, 112, 125, 136, 148]),
+  TSLA: makeYearlyPoints(2021, [100, 128, 119, 137, 142, 160])
 };
 
 function buildHtml() {
   return `<!doctype html><html><body>
+    <div id="modeSwitch">
+      <button data-mode="pm" class="active"></button>
+      <button data-mode="mpm"></button>
+    </div>
+    <h1 id="modeTitle"></h1>
+    <p id="modeSubtitle"></p>
+    <h2 id="builderTitle"></h2>
+    <p id="builderHint"></p>
     <textarea id="rawInput"></textarea>
     <button id="detectBtn"></button>
     <span id="detectInfo"></span>
     <div id="assetsContainer"></div>
+    <h2 id="collectionTitle"></h2>
+    <p id="collectionHint"></p>
     <input id="groupName" />
     <button id="saveGroupBtn"></button>
+    <div id="subsetBuilder" class="hidden"></div>
+    <input id="subsetPortfolioInput" />
+    <button id="addSubsetBtn"></button>
+    <datalist id="portfolioSuggestions"></datalist>
     <div id="groupsContainer"></div>
+    <h2 id="compareTitle"></h2>
+    <p id="compareHint"></p>
     <button id="runCompareBtn"></button>
     <button id="clearCompareBtn"></button>
     <div id="compareWarning"></div>
@@ -44,7 +61,10 @@ function buildHtml() {
     <input id="compareField3" />
     <input id="compareField4" />
     <datalist id="compareSuggestions"></datalist>
-    <table><tbody id="perfTableBody"></tbody></table>
+    <table>
+      <thead><tr><th id="perfHeadLabel"></th><th id="perfHeadYtd"></th><th id="perfHead1y"></th><th id="perfHead3y"></th></tr></thead>
+      <tbody id="perfTableBody"></tbody>
+    </table>
     <table>
       <thead><tr><th id="yoyTitle">YoY</th></tr></thead>
       <tbody id="yoyTableBody"></tbody>
@@ -124,10 +144,23 @@ describe('chart rendering flows', () => {
       const parsed = new URL(url, 'http://localhost:3000');
       if (parsed.pathname === '/api/resolve') {
         const query = parsed.searchParams.get('query');
-        if (String(query || '').toUpperCase() === 'EXXON') {
+        const normalized = String(query || '').toUpperCase();
+        if (normalized === 'EXXON') {
           return {
             ok: true,
             json: async () => ({ query, symbol: 'XOM', source: 'yahoo-search' })
+          };
+        }
+        if (normalized === 'US0378331005') {
+          return {
+            ok: true,
+            json: async () => ({ query, symbol: 'AAPL', source: 'yahoo-search' })
+          };
+        }
+        if (normalized === 'A1JX52') {
+          return {
+            ok: true,
+            json: async () => ({ query, symbol: 'EQQQ', source: 'yahoo-search' })
           };
         }
         return {
@@ -168,12 +201,15 @@ describe('chart rendering flows', () => {
     detectBtn.click();
     await tick();
     groupName.value = 'Tech stocks';
+    groupName.dispatchEvent(new window.Event('input'));
     saveGroupBtn.click();
 
     rawInput.value = 'GLD\nSLVR\nURA';
+    rawInput.dispatchEvent(new window.Event('input'));
     detectBtn.click();
     await tick();
     groupName.value = 'Materias primas';
+    groupName.dispatchEvent(new window.Event('input'));
     saveGroupBtn.click();
 
     document.querySelector('button[data-range="5y"]').click();
@@ -202,6 +238,7 @@ describe('chart rendering flows', () => {
     detectBtn.click();
     await tick();
     groupName.value = 'Tech stocks';
+    groupName.dispatchEvent(new window.Event('input'));
     saveGroupBtn.click();
 
     document.getElementById('compareField1').value = 'Tech stocks';
@@ -213,7 +250,7 @@ describe('chart rendering flows', () => {
 
     expect(global.__chartInstance).toBeTruthy();
     expect(global.__chartInstance.data.datasets.length).toBe(4);
-    expect(global.__chartInstance.data.datasets.map((d) => d.label)).toEqual([
+    expect(global.__chartInstance.data.datasets.map((dataset) => dataset.label)).toEqual([
       'Tech stocks',
       'GLD',
       'MSFT',
@@ -231,6 +268,7 @@ describe('chart rendering flows', () => {
     detectBtn.click();
     await tick();
     groupName.value = 'Mix demo';
+    groupName.dispatchEvent(new window.Event('input'));
     saveGroupBtn.click();
 
     const componentsBtn = document.querySelector('button[data-action="components"][data-index="0"]');
@@ -240,7 +278,7 @@ describe('chart rendering flows', () => {
     await tick();
 
     expect(global.__chartInstance).toBeTruthy();
-    expect(global.__chartInstance.data.datasets.map((d) => d.label)).toEqual(['AAPL', 'NVDA', 'GLD']);
+    expect(global.__chartInstance.data.datasets.map((dataset) => dataset.label)).toEqual(['AAPL', 'NVDA', 'GLD']);
     expect(document.querySelectorAll('#perfTableBody tr').length).toBe(3);
   });
 
@@ -254,6 +292,7 @@ describe('chart rendering flows', () => {
     detectBtn.click();
     await tick();
     groupName.value = 'Large group';
+    groupName.dispatchEvent(new window.Event('input'));
     saveGroupBtn.click();
 
     const componentsBtn = document.querySelector('button[data-action="components"][data-index="0"]');
@@ -262,7 +301,7 @@ describe('chart rendering flows', () => {
 
     expect(global.__chartInstance).toBeTruthy();
     expect(global.__chartInstance.data.datasets.length).toBe(6);
-    expect(global.__chartInstance.data.datasets.map((d) => d.label)).toEqual([
+    expect(global.__chartInstance.data.datasets.map((dataset) => dataset.label)).toEqual([
       'AAPL',
       'NVDA',
       'GLD',
@@ -279,7 +318,7 @@ describe('chart rendering flows', () => {
     await tick();
 
     expect(global.__chartInstance).toBeTruthy();
-    expect(global.__chartInstance.data.datasets.map((d) => d.label)).toEqual(['AAPL', 'XOM']);
+    expect(global.__chartInstance.data.datasets.map((dataset) => dataset.label)).toEqual(['AAPL', 'XOM']);
   });
 
   it('maps major crypto symbols directly to spot pairs', async () => {
@@ -289,7 +328,7 @@ describe('chart rendering flows', () => {
     await tick();
 
     expect(global.__chartInstance).toBeTruthy();
-    expect(global.__chartInstance.data.datasets.map((d) => d.label)).toEqual(['BTC-USD', 'ETH-USD']);
+    expect(global.__chartInstance.data.datasets.map((dataset) => dataset.label)).toEqual(['BTC-USD', 'ETH-USD']);
   });
 
   it('still plots valid series when one ticker is invalid and shows warning', async () => {
@@ -299,7 +338,7 @@ describe('chart rendering flows', () => {
     await tick();
 
     expect(global.__chartInstance).toBeTruthy();
-    expect(global.__chartInstance.data.datasets.map((d) => d.label)).toEqual(['AAPL']);
+    expect(global.__chartInstance.data.datasets.map((dataset) => dataset.label)).toEqual(['AAPL']);
     expect(document.getElementById('compareWarning').textContent).toContain('Advertencia:');
   });
 
@@ -310,7 +349,7 @@ describe('chart rendering flows', () => {
     await tick();
 
     expect(global.__chartInstance).toBeTruthy();
-    expect(global.__chartInstance.data.datasets.map((d) => d.label)).toEqual(['AAPL', 'EQQQ']);
+    expect(global.__chartInstance.data.datasets.map((dataset) => dataset.label)).toEqual(['AAPL', 'EQQQ']);
     expect(document.getElementById('compareWarning').textContent).toBe('');
   });
 
@@ -321,7 +360,18 @@ describe('chart rendering flows', () => {
     await tick();
 
     expect(global.__chartInstance).toBeTruthy();
-    expect(global.__chartInstance.data.datasets.map((d) => d.label)).toEqual(['AAPL', 'EQQQ.L']);
+    expect(global.__chartInstance.data.datasets.map((dataset) => dataset.label)).toEqual(['AAPL', 'EQQQ.L']);
+  });
+
+  it('resolves ISIN and WKN identifiers through the resolver instead of truncating them', async () => {
+    document.getElementById('compareField1').value = 'US0378331005';
+    document.getElementById('compareField2').value = 'A1JX52';
+    document.getElementById('runCompareBtn').click();
+    await tick();
+
+    expect(global.__chartInstance).toBeTruthy();
+    expect(global.__chartInstance.data.datasets.map((dataset) => dataset.label)).toEqual(['AAPL', 'EQQQ']);
+    expect(document.getElementById('compareWarning').textContent).toBe('');
   });
 
   it('supports second column allocation in multiline text input', async () => {
@@ -335,11 +385,12 @@ describe('chart rendering flows', () => {
     await tick();
 
     groupName.value = 'Weighted tech';
+    groupName.dispatchEvent(new window.Event('input'));
     saveGroupBtn.click();
 
     const groupText = document.getElementById('groupsContainer').textContent;
-    expect(groupText).toContain('AAPL (70%');
-    expect(groupText).toContain('NVDA (30%');
+    expect(groupText).toContain('AAPL (70');
+    expect(groupText).toContain('NVDA (30');
   });
 
   it('shows YoY table when clicking legend on 5Y range', async () => {
@@ -407,6 +458,7 @@ describe('chart rendering flows', () => {
     detectBtn.click();
     await tick();
     groupName.value = 'Tech stocks';
+    groupName.dispatchEvent(new window.Event('input'));
     saveGroupBtn.click();
 
     const groupNamePick = document.querySelector('[data-pick-value="Tech stocks"]');
@@ -428,5 +480,134 @@ describe('chart rendering flows', () => {
 
     expect(document.getElementById('compareField1').value).toBe('');
     expect(document.getElementById('compareField2').value).toBe('');
+  });
+
+  it('supports MPM portfolios with subsets and compares them against subsets and direct stocks', async () => {
+    document.querySelector('[data-mode="mpm"]').click();
+    await tick();
+
+    const rawInput = document.getElementById('rawInput');
+    const detectBtn = document.getElementById('detectBtn');
+    const groupName = document.getElementById('groupName');
+    const saveGroupBtn = document.getElementById('saveGroupBtn');
+    const addSubsetBtn = document.getElementById('addSubsetBtn');
+    const subsetInput = document.getElementById('subsetPortfolioInput');
+
+    rawInput.value = 'AAPL, price=95, units=2, buyDate=2023-01-02\nMSFT, price=102, units=1';
+    rawInput.dispatchEvent(new window.Event('input'));
+    detectBtn.click();
+    await tick();
+    groupName.value = 'Core';
+    groupName.dispatchEvent(new window.Event('input'));
+    saveGroupBtn.click();
+    await tick();
+
+    rawInput.value = 'NVDA, price=88, units=3, sell=2024-01-02';
+    rawInput.dispatchEvent(new window.Event('input'));
+    detectBtn.click();
+    await tick();
+    groupName.value = 'Trading';
+    groupName.dispatchEvent(new window.Event('input'));
+    saveGroupBtn.click();
+    await tick();
+
+    rawInput.value = 'GLD, price=101, units=2';
+    rawInput.dispatchEvent(new window.Event('input'));
+    detectBtn.click();
+    await tick();
+    subsetInput.value = 'Core';
+    addSubsetBtn.click();
+    await tick();
+    subsetInput.value = 'Trading';
+    addSubsetBtn.click();
+    await tick();
+    groupName.value = 'Total';
+    groupName.dispatchEvent(new window.Event('input'));
+    saveGroupBtn.click();
+    await tick();
+
+    document.getElementById('compareField1').value = 'Total';
+    document.getElementById('compareField2').value = 'Core';
+    document.getElementById('compareField3').value = 'TSLA';
+    document.getElementById('runCompareBtn').click();
+    await tick();
+
+    expect(global.__chartInstance).toBeTruthy();
+    expect(global.__chartInstance.data.datasets.map((dataset) => dataset.label)).toEqual(['Total', 'Core', 'TSLA']);
+    expect(document.getElementById('groupsContainer').textContent).toContain('Subset');
+  });
+
+  it('expands nested MPM holdings when viewing portfolio holdings', async () => {
+    document.querySelector('[data-mode="mpm"]').click();
+    await tick();
+
+    const rawInput = document.getElementById('rawInput');
+    const detectBtn = document.getElementById('detectBtn');
+    const groupName = document.getElementById('groupName');
+    const saveGroupBtn = document.getElementById('saveGroupBtn');
+    const addSubsetBtn = document.getElementById('addSubsetBtn');
+    const subsetInput = document.getElementById('subsetPortfolioInput');
+
+    rawInput.value = 'AAPL, 95, 2, 2023-01-02\nMSFT, 101, 1';
+    rawInput.dispatchEvent(new window.Event('input'));
+    detectBtn.click();
+    await tick();
+    groupName.value = 'Core';
+    groupName.dispatchEvent(new window.Event('input'));
+    saveGroupBtn.click();
+    await tick();
+
+    rawInput.value = 'NVDA, 88, 3';
+    rawInput.dispatchEvent(new window.Event('input'));
+    detectBtn.click();
+    await tick();
+    subsetInput.value = 'Core';
+    addSubsetBtn.click();
+    await tick();
+    groupName.value = 'Master';
+    groupName.dispatchEvent(new window.Event('input'));
+    saveGroupBtn.click();
+    await tick();
+
+    const holdingsBtn = document.querySelector('button[data-action="components"][data-index="1"]');
+    expect(holdingsBtn).toBeTruthy();
+    holdingsBtn.click();
+    await tick();
+
+    expect(global.__chartInstance).toBeTruthy();
+    expect(global.__chartInstance.data.datasets.length).toBe(3);
+    expect(global.__chartInstance.data.datasets[1].label).toContain('Core');
+  });
+
+  it('tracks buyDate in MPM and starts the holding series from the buy date', async () => {
+    document.querySelector('[data-mode="mpm"]').click();
+    await tick();
+
+    const rawInput = document.getElementById('rawInput');
+    const detectBtn = document.getElementById('detectBtn');
+    const groupName = document.getElementById('groupName');
+    const saveGroupBtn = document.getElementById('saveGroupBtn');
+
+    rawInput.value = 'AAPL, price=95, units=2, buyDate=2024-01-02';
+    rawInput.dispatchEvent(new window.Event('input'));
+    detectBtn.click();
+    await tick();
+    groupName.value = 'Bought later';
+    groupName.dispatchEvent(new window.Event('input'));
+    saveGroupBtn.click();
+    await tick();
+
+    document.querySelector('button[data-range="5y"]').click();
+    await tick();
+
+    expect(document.getElementById('groupsContainer').textContent).toContain('buy 2024-01-02');
+
+    const holdingsBtn = document.querySelector('button[data-action="components"][data-index="0"]');
+    holdingsBtn.click();
+    await tick();
+
+    expect(global.__chartInstance).toBeTruthy();
+    expect(global.__chartInstance.data.labels[0]).toBe('2024-01-02');
+    expect(global.__chartInstance.data.datasets[0].label).toContain('buy 2024-01-02');
   });
 });

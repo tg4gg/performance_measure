@@ -62,51 +62,74 @@ const resolverAliases = {
 };
 
 const basePalette = ['#4db5ff', '#6fffb4', '#ffcb6b', '#ff7a90', '#7cc6ff', '#9cffd3'];
+const PROCESSING_MIN_MS =
+  typeof window !== 'undefined' && /jsdom/i.test(window.navigator.userAgent) ? 0 : 180;
+
+const modeConfigs = {
+  pm: {
+    storageKey: 'groups',
+    title: 'Performance Measure',
+    subtitle: 'Pega texto libre, detecta activos, arma grupos ponderados y compara performance.',
+    builderTitle: '1) Texto libre / multilinea',
+    builderHint:
+      'Una linea por activo. Puedes usar ticker, alias o nombre libre. Si agregas un numero al final, se interpreta como peso porcentual.',
+    builderPlaceholder: 'Ejemplo:\nApple\noro\nS&P 500\nNasdaq\nNVDA, 25',
+    detectLabel: 'Detectar activos',
+    collectionTitle: '2) Crear grupo compuesto',
+    collectionHint: 'Los grupos mantienen pesos relativos y se pueden comparar como una sola seleccion.',
+    namePlaceholder: 'Nombre del grupo (ej. Materias Primas)',
+    saveLabel: 'Guardar grupo',
+    updateLabel: 'Actualizar grupo',
+    emptyCollectionText: 'No hay grupos guardados todavia.',
+    compareTitle: '3) Comparacion',
+    compareHint:
+      'Cada campo acepta ticker, WKN, ISIN o nombre exacto de grupo creado. Puedes ejecutar con 1 a 4 selecciones.',
+    comparePlaceholderBase: 'ticker o grupo',
+    compareButtonLabel: 'Analizar seleccion',
+    clearButtonLabel: 'Limpiar seleccion',
+    itemDetectedLabel: 'activo(s) detectado(s)',
+    collectionSingular: 'grupo',
+    collectionPlural: 'grupos',
+    viewComponentsLabel: 'Ver componentes',
+    directEntryKind: 'ticker'
+  },
+  mpm: {
+    storageKey: 'mpmPortfolios',
+    title: 'My Performance Measure',
+    subtitle:
+      'Registra holdings reales con precio de compra, unidades, venta opcional y portfolios con subsets reutilizables.',
+    builderTitle: '1) Holdings del portfolio',
+    builderHint:
+      'Formato flexible por linea: AAPL, 182.4, 12 o AAPL, price=182.4, units=12, buyDate=2025-01-10, sell=2025-12-01. Los subsets se agregan aparte.',
+    builderPlaceholder:
+      'Ejemplo:\nAAPL, 182.4, 12, buyDate=2025-01-10\nMSFT, price=420, units=6\nNVDA, price=610, units=4, sell=2025-09-20',
+    detectLabel: 'Detectar holdings',
+    collectionTitle: '2) Crear portfolio',
+    collectionHint:
+      'Un portfolio puede incluir holdings directos y subsets que referencian otros portfolios ya guardados.',
+    namePlaceholder: 'Nombre del portfolio (ej. Largo plazo)',
+    saveLabel: 'Guardar portfolio',
+    updateLabel: 'Actualizar portfolio',
+    emptyCollectionText: 'No hay portfolios guardados todavia.',
+    compareTitle: '3) Comparacion PM / MPM',
+    compareHint:
+      'Cada campo acepta ticker, WKN, ISIN, portfolio o subset. Puedes ejecutar con 1 a 4 selecciones. Los portfolios se comparan usando costo base, unidades y fechas de compra/venta si existen.',
+    comparePlaceholderBase: 'ticker, portfolio o subset',
+    compareButtonLabel: 'Analizar seleccion',
+    clearButtonLabel: 'Limpiar seleccion',
+    itemDetectedLabel: 'holding(s) detectado(s)',
+    collectionSingular: 'portfolio',
+    collectionPlural: 'portfolios',
+    viewComponentsLabel: 'Ver holdings',
+    directEntryKind: 'ticker'
+  }
+};
 
 function colorForSeries(index) {
   if (index < basePalette.length) return basePalette[index];
-  // Golden-angle hue distribution gives visually distinct colors for many series.
   const hue = Math.round((index * 137.508) % 360);
   return `hsl(${hue} 78% 62%)`;
 }
-
-const state = {
-  assetsDraft: [],
-  groups: loadLocal('groups', []),
-  marketCache: {},
-  resolveCache: loadLocal('resolveCache', {}),
-  symbolNames: loadLocal('symbolNames', {}),
-  activeRange: 'ytd',
-  chart: null,
-  lastCompare: null,
-  editingGroupIndex: null
-};
-
-const input = document.getElementById('rawInput');
-const detectBtn = document.getElementById('detectBtn');
-const detectInfo = document.getElementById('detectInfo');
-const assetsContainer = document.getElementById('assetsContainer');
-const groupName = document.getElementById('groupName');
-const saveGroupBtn = document.getElementById('saveGroupBtn');
-const groupsContainer = document.getElementById('groupsContainer');
-const runCompareBtn = document.getElementById('runCompareBtn');
-const clearCompareBtn = document.getElementById('clearCompareBtn');
-const compareFields = [
-  document.getElementById('compareField1'),
-  document.getElementById('compareField2'),
-  document.getElementById('compareField3'),
-  document.getElementById('compareField4')
-];
-const compareSuggestions = document.getElementById('compareSuggestions');
-const perfTableBody = document.getElementById('perfTableBody');
-const yoyTitle = document.getElementById('yoyTitle');
-const yoyTableBody = document.getElementById('yoyTableBody');
-const chartLegend = document.getElementById('chartLegend');
-const compareWarning = document.getElementById('compareWarning');
-const rangeButtons = document.getElementById('rangeButtons');
-const pendingSymbolNameRequests = new Map();
-const PROCESSING_MIN_MS =
-  typeof window !== 'undefined' && /jsdom/i.test(window.navigator.userAgent) ? 0 : 180;
 
 function loadLocal(key, fallback) {
   try {
@@ -120,6 +143,89 @@ function loadLocal(key, fallback) {
 
 function saveLocal(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
+}
+
+function createModeState(mode) {
+  const stored = loadLocal(modeConfigs[mode].storageKey, []);
+  return {
+    draftItems: [],
+    collections: Array.isArray(stored) ? stored : [],
+    activeRange: 'ytd',
+    lastCompare: null,
+    editingIndex: null,
+    rawInput: '',
+    draftName: '',
+    compareDraft: ['', '', '', '']
+  };
+}
+
+const state = {
+  activeMode: loadLocal('activeMode', 'pm'),
+  modes: {
+    pm: createModeState('pm'),
+    mpm: createModeState('mpm')
+  },
+  marketCache: {},
+  resolveCache: loadLocal('resolveCache', {}),
+  symbolNames: loadLocal('symbolNames', {}),
+  chart: null
+};
+
+const modeSwitch = document.getElementById('modeSwitch');
+const modeTitle = document.getElementById('modeTitle');
+const modeSubtitle = document.getElementById('modeSubtitle');
+const builderTitle = document.getElementById('builderTitle');
+const builderHint = document.getElementById('builderHint');
+const input = document.getElementById('rawInput');
+const detectBtn = document.getElementById('detectBtn');
+const detectInfo = document.getElementById('detectInfo');
+const assetsContainer = document.getElementById('assetsContainer');
+const collectionTitle = document.getElementById('collectionTitle');
+const collectionHint = document.getElementById('collectionHint');
+const groupName = document.getElementById('groupName');
+const saveGroupBtn = document.getElementById('saveGroupBtn');
+const groupsContainer = document.getElementById('groupsContainer');
+const subsetBuilder = document.getElementById('subsetBuilder');
+const subsetPortfolioInput = document.getElementById('subsetPortfolioInput');
+const addSubsetBtn = document.getElementById('addSubsetBtn');
+const portfolioSuggestions = document.getElementById('portfolioSuggestions');
+const compareTitle = document.getElementById('compareTitle');
+const compareHint = document.getElementById('compareHint');
+const runCompareBtn = document.getElementById('runCompareBtn');
+const clearCompareBtn = document.getElementById('clearCompareBtn');
+const compareFields = [
+  document.getElementById('compareField1'),
+  document.getElementById('compareField2'),
+  document.getElementById('compareField3'),
+  document.getElementById('compareField4')
+];
+const compareSuggestions = document.getElementById('compareSuggestions');
+const perfHeadLabel = document.getElementById('perfHeadLabel');
+const perfHeadYtd = document.getElementById('perfHeadYtd');
+const perfHead1y = document.getElementById('perfHead1y');
+const perfHead3y = document.getElementById('perfHead3y');
+const perfTableBody = document.getElementById('perfTableBody');
+const yoyTitle = document.getElementById('yoyTitle');
+const yoyTableBody = document.getElementById('yoyTableBody');
+const chartLegend = document.getElementById('chartLegend');
+const compareWarning = document.getElementById('compareWarning');
+const rangeButtons = document.getElementById('rangeButtons');
+const pendingSymbolNameRequests = new Map();
+
+function getActiveModeState() {
+  return state.modes[state.activeMode];
+}
+
+function getModeState(mode) {
+  return state.modes[mode];
+}
+
+function getModeConfig(mode = state.activeMode) {
+  return modeConfigs[mode];
+}
+
+function persistModeCollections(mode) {
+  saveLocal(modeConfigs[mode].storageKey, getModeState(mode).collections);
 }
 
 function sleep(ms) {
@@ -145,7 +251,6 @@ async function withButtonProcessing(button, action) {
   }
 }
 
-// Prevent quota issues from old large historical cache stored in localStorage.
 try {
   localStorage.removeItem('marketCache');
 } catch {
@@ -160,8 +265,9 @@ function normalizeLine(line) {
   const cleaned = upper.replace(/[^A-Z0-9=^.-]/g, ' ').trim();
   if (resolverAliases[cleaned]) return resolverAliases[cleaned];
   if (cleaned.includes(' ')) return '';
+  if (/^[A-Z0-9]{6}$/.test(cleaned)) return '';
+  if (/^[A-Z]{2}[A-Z0-9]{9}\d$/.test(cleaned)) return '';
 
-  // If user already entered an explicit exchange-qualified symbol, keep it as-is.
   if (/^\^?[A-Z]{1,6}\.[A-Z]{1,5}$/.test(cleaned)) return cleaned;
   if (/^\^?[A-Z]{1,6}(?:-[A-Z]{1,5}|=[A-Z])$/.test(cleaned)) return cleaned;
 
@@ -177,7 +283,7 @@ async function resolveInputToSymbol(raw) {
 
   const key = String(raw || '').trim().toUpperCase().replace(/\s+/g, ' ');
   if (!key) {
-    throw new Error('Entrada vacía');
+    throw new Error('Entrada vacia');
   }
 
   const cached = state.resolveCache[key];
@@ -273,11 +379,10 @@ async function enrichTickerHover(rootNode) {
   nodes.forEach((node) => setTickerTitle(node, node.dataset.symbol));
 }
 
-function parseLineEntry(line) {
+function parsePmLineEntry(line) {
   const text = String(line || '').trim();
   if (!text) return null;
 
-  // Preferred format: "symbol_or_name, weight" (also supports ; | tab).
   const delimMatch = text.match(/^(.+?)[\t,;|]\s*([+-]?\d+(?:[.,]\d+)?)\s*%?\s*$/);
   if (delimMatch) {
     return {
@@ -286,7 +391,6 @@ function parseLineEntry(line) {
     };
   }
 
-  // Fallback: "symbol_or_name 25%" (requires % to avoid conflicts like "S&P 500").
   const pctMatch = text.match(/^(.+?)\s+([+-]?\d+(?:[.,]\d+)?)\s*%$/);
   if (pctMatch) {
     return {
@@ -323,6 +427,83 @@ function assignDraftWeights(entries) {
   }));
 }
 
+function parseMaybeNumber(value) {
+  if (value == null || value === '') return null;
+  const parsed = Number(String(value).replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseMpmLineEntry(line) {
+  const text = String(line || '').trim();
+  if (!text) return null;
+
+  const segments = text
+    .split(/[\t,;|]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (segments.length === 0) return null;
+
+  const [raw, ...rest] = segments;
+  const parsed = {
+    raw,
+    purchasePrice: null,
+    units: null,
+    buyDate: '',
+    sellDate: ''
+  };
+
+  rest.forEach((token) => {
+    const named = token.match(
+      /^(price|purchase|buy|cost|units|qty|quantity|shares|buydate|buy_date|start|opened|sell|selldate|sell_date|sold|date)\s*=\s*(.+)$/i
+    );
+    if (named) {
+      const key = named[1].toLowerCase();
+      const value = named[2].trim();
+      if (['price', 'purchase', 'buy', 'cost'].includes(key)) {
+        parsed.purchasePrice = parseMaybeNumber(value);
+        return;
+      }
+      if (['units', 'qty', 'quantity', 'shares'].includes(key)) {
+        parsed.units = parseMaybeNumber(value);
+        return;
+      }
+      if (['buydate', 'buy_date', 'start', 'opened'].includes(key)) {
+        parsed.buyDate = value;
+        return;
+      }
+      parsed.sellDate = value;
+      return;
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(token)) {
+      if (!parsed.buyDate) {
+        parsed.buyDate = token;
+      } else {
+        parsed.sellDate = token;
+      }
+      return;
+    }
+
+    const numeric = parseMaybeNumber(token);
+    if (numeric != null) {
+      if (parsed.purchasePrice == null) {
+        parsed.purchasePrice = numeric;
+      } else if (parsed.units == null) {
+        parsed.units = numeric;
+      }
+    }
+  });
+
+  return parsed;
+}
+
+function sanitizeDate(value) {
+  if (!value) return '';
+  const raw = String(value).trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : '';
+}
+
 async function detectAssetsFromText(text) {
   const lines = text
     .split('\n')
@@ -333,7 +514,7 @@ async function detectAssetsFromText(text) {
   const unresolved = [];
 
   for (const line of lines) {
-    const parsed = parseLineEntry(line);
+    const parsed = parsePmLineEntry(line);
     if (!parsed) continue;
 
     try {
@@ -353,106 +534,289 @@ async function detectAssetsFromText(text) {
     }
   }
 
-  const assets = assignDraftWeights([...unique.values()]);
+  return { items: assignDraftWeights([...unique.values()]), unresolved };
+}
 
-  return { assets, unresolved };
+async function detectHoldingsFromText(text) {
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const items = [];
+  const unresolved = [];
+
+  for (const line of lines) {
+    const parsed = parseMpmLineEntry(line);
+    if (!parsed) continue;
+
+    try {
+      const resolved = await resolveInputToSymbol(parsed.raw);
+      items.push({
+        type: 'holding',
+        raw: parsed.raw,
+        symbol: resolved.symbol,
+        purchasePrice: parsed.purchasePrice,
+        units: parsed.units,
+        buyDate: sanitizeDate(parsed.buyDate),
+        sellDate: sanitizeDate(parsed.sellDate),
+        sourcePath: []
+      });
+    } catch {
+      unresolved.push(parsed.raw);
+    }
+  }
+
+  return { items, unresolved };
+}
+
+function formatInputNumber(value) {
+  return value == null || Number.isNaN(value) ? '' : String(value);
+}
+
+function formatShortNumber(value) {
+  if (value == null || Number.isNaN(value)) return '-';
+  const abs = Math.abs(value);
+  if (abs >= 1000) return value.toFixed(0);
+  if (abs >= 10) return value.toFixed(2).replace(/\.00$/, '');
+  return value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function summarizeMpmItem(item) {
+  if (item.type === 'portfolio') {
+    return `<span class="badge">Subset</span> <span class="group-pick" data-pick-value="${escapeHtml(
+      item.refName
+    )}">${escapeHtml(item.refName)}</span>`;
+  }
+  const details = [];
+  if (item.purchasePrice != null) details.push(`cost ${formatShortNumber(item.purchasePrice)}`);
+  if (item.units != null) details.push(`units ${formatShortNumber(item.units)}`);
+  if (item.buyDate) details.push(`buy ${item.buyDate}`);
+  if (item.sellDate) details.push(`sell ${item.sellDate}`);
+  const meta = details.length ? ` · ${details.join(' · ')}` : '';
+  return `<span class="group-pick" data-pick-value="${escapeHtml(item.symbol)}" data-symbol="${escapeHtml(
+    item.symbol
+  )}">${escapeHtml(item.symbol)}</span>${meta}`;
+}
+
+function escapeHtml(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function renderAssetsDraft() {
+  const mode = state.activeMode;
+  const modeState = getActiveModeState();
   assetsContainer.innerHTML = '';
-  state.assetsDraft.forEach((asset, index) => {
-    const row = document.createElement('div');
-    row.className = 'asset-row';
-    row.innerHTML = `
-      <span class="pill">${asset.raw} -> <span data-symbol="${asset.symbol}">${asset.symbol}</span></span>
-      <input type="number" min="0" step="0.01" value="${asset.weight}" data-index="${index}" />
-      <span class="muted">peso %</span>
-    `;
 
-    row.querySelector('input').addEventListener('input', (e) => {
-      state.assetsDraft[index].weight = Number(e.target.value || 0);
-    });
+  modeState.draftItems.forEach((item, index) => {
+    const row = document.createElement('div');
+
+    if (mode === 'pm') {
+      row.className = 'asset-row pm-row';
+      row.innerHTML = `
+        <span class="pill">${escapeHtml(item.raw)} -> <span data-symbol="${escapeHtml(item.symbol)}">${escapeHtml(
+          item.symbol
+        )}</span></span>
+        <input type="number" min="0" step="0.01" value="${formatInputNumber(item.weight)}" data-index="${index}" data-field="weight" />
+        <span class="muted">peso %</span>
+      `;
+
+      row.querySelector('input').addEventListener('input', (e) => {
+        modeState.draftItems[index].weight = Number(e.target.value || 0);
+      });
+    } else if (item.type === 'portfolio') {
+      row.className = 'asset-row subset-row';
+      row.innerHTML = `
+        <span class="pill subset-pill">Subset -> ${escapeHtml(item.refName)}</span>
+        <span class="muted">Reusa el portfolio guardado dentro de este portfolio.</span>
+        <div class="group-actions">
+          <button type="button" class="warn" data-action="remove-subset" data-index="${index}">Quitar</button>
+        </div>
+      `;
+      row.querySelector('button').addEventListener('click', () => {
+        modeState.draftItems.splice(index, 1);
+        renderAssetsDraft();
+      });
+    } else {
+      row.className = 'asset-row mpm-row';
+      row.innerHTML = `
+        <span class="pill">${escapeHtml(item.raw)} -> <span data-symbol="${escapeHtml(item.symbol)}">${escapeHtml(
+          item.symbol
+        )}</span></span>
+        <input type="number" min="0" step="0.0001" value="${formatInputNumber(item.purchasePrice)}" data-index="${index}" data-field="purchasePrice" placeholder="Compra" />
+        <input type="number" min="0" step="0.0001" value="${formatInputNumber(item.units)}" data-index="${index}" data-field="units" placeholder="Unidades" />
+        <input type="date" value="${escapeHtml(item.buyDate || '')}" data-index="${index}" data-field="buyDate" />
+        <input type="date" value="${escapeHtml(item.sellDate || '')}" data-index="${index}" data-field="sellDate" />
+        <div class="group-actions">
+          <button type="button" class="warn" data-action="remove-holding" data-index="${index}">Quitar</button>
+        </div>
+      `;
+
+      row.querySelectorAll('input').forEach((field) => {
+        field.addEventListener('input', (e) => {
+          const target = modeState.draftItems[index];
+          const key = e.target.dataset.field;
+          if (!target || !key) return;
+          if (key === 'sellDate' || key === 'buyDate') {
+            target[key] = sanitizeDate(e.target.value);
+            return;
+          }
+          target[key] = parseMaybeNumber(e.target.value);
+        });
+      });
+
+      row.querySelector('button').addEventListener('click', () => {
+        modeState.draftItems.splice(index, 1);
+        renderAssetsDraft();
+      });
+    }
 
     assetsContainer.appendChild(row);
   });
+
   void enrichTickerHover(assetsContainer);
 }
 
-function setDraftFromGroup(group) {
-  state.assetsDraft = group.assets.map((a) => ({
-    raw: a.symbol,
-    symbol: a.symbol,
-    weight: Number(a.weight)
-  }));
+function stringifyPmCollectionLines(collection) {
+  return (collection.assets || []).map((asset) => `${asset.symbol}, ${formatShortNumber(asset.weight)}`).join('\n');
+}
+
+function stringifyMpmHoldingLine(item) {
+  const tokens = [item.symbol];
+  if (item.purchasePrice != null) tokens.push(`price=${formatShortNumber(item.purchasePrice)}`);
+  if (item.units != null) tokens.push(`units=${formatShortNumber(item.units)}`);
+  if (item.buyDate) tokens.push(`buyDate=${item.buyDate}`);
+  if (item.sellDate) tokens.push(`sell=${item.sellDate}`);
+  return tokens.join(', ');
+}
+
+function setDraftFromCollection(collection) {
+  const modeState = getActiveModeState();
+  if (state.activeMode === 'pm') {
+    modeState.draftItems = (collection.assets || []).map((asset) => ({
+      raw: asset.symbol,
+      symbol: asset.symbol,
+      weight: Number(asset.weight)
+    }));
+    modeState.rawInput = stringifyPmCollectionLines(collection);
+  } else {
+    modeState.draftItems = (collection.items || []).map((item) =>
+      item.type === 'portfolio'
+        ? { type: 'portfolio', refName: item.refName }
+        : {
+            type: 'holding',
+            raw: item.raw || item.symbol,
+            symbol: item.symbol,
+            purchasePrice: item.purchasePrice ?? null,
+            units: item.units ?? null,
+            buyDate: item.buyDate || '',
+            sellDate: item.sellDate || '',
+            sourcePath: []
+          }
+    );
+    modeState.rawInput = modeState.draftItems
+      .filter((item) => item.type === 'holding')
+      .map((item) => stringifyMpmHoldingLine(item))
+      .join('\n');
+  }
+  modeState.draftName = collection.name;
+  input.value = modeState.rawInput;
+  groupName.value = modeState.draftName;
   renderAssetsDraft();
-  detectInfo.textContent = `${state.assetsDraft.length} activo(s) cargado(s) para edición.`;
+  detectInfo.textContent = `${modeState.draftItems.length} item(s) cargado(s) para edicion.`;
 }
 
-function resetGroupEditor() {
-  state.editingGroupIndex = null;
-  saveGroupBtn.textContent = 'Guardar grupo';
+function resetCollectionEditor() {
+  getActiveModeState().editingIndex = null;
+  saveGroupBtn.textContent = getModeConfig().saveLabel;
 }
 
-function deleteGroup(index) {
-  state.groups.splice(index, 1);
-  saveLocal('groups', state.groups);
+function deleteCollection(index) {
+  const modeState = getActiveModeState();
+  modeState.collections.splice(index, 1);
+  persistModeCollections(state.activeMode);
 
-  if (state.editingGroupIndex === index) {
+  if (modeState.editingIndex === index) {
+    modeState.draftName = '';
+    modeState.rawInput = '';
     groupName.value = '';
-    state.assetsDraft = [];
+    input.value = '';
+    modeState.draftItems = [];
     renderAssetsDraft();
-    resetGroupEditor();
+    resetCollectionEditor();
   }
 
-  if (state.editingGroupIndex != null && state.editingGroupIndex > index) {
-    state.editingGroupIndex -= 1;
+  if (modeState.editingIndex != null && modeState.editingIndex > index) {
+    modeState.editingIndex -= 1;
   }
 
-  renderGroups();
+  renderCollections();
 }
 
-function editGroup(index) {
-  const group = state.groups[index];
-  if (!group) return;
+function editCollection(index) {
+  const collection = getActiveModeState().collections[index];
+  if (!collection) return;
 
-  groupName.value = group.name;
-  input.value = group.assets.map((a) => `${a.symbol}, ${a.weight}`).join('\n');
-  state.editingGroupIndex = index;
-  saveGroupBtn.textContent = 'Actualizar grupo';
-  setDraftFromGroup(group);
+  getActiveModeState().editingIndex = index;
+  saveGroupBtn.textContent = getModeConfig().updateLabel;
+  setDraftFromCollection(collection);
 }
 
 function renderSuggestions() {
-  compareSuggestions.innerHTML = state.groups.map((group) => `<option value="${group.name}"></option>`).join('');
+  const modeState = getActiveModeState();
+  compareSuggestions.innerHTML = modeState.collections
+    .map((collection) => `<option value="${escapeHtml(collection.name)}"></option>`)
+    .join('');
+
+  portfolioSuggestions.innerHTML = getModeState('mpm').collections
+    .map((collection) => `<option value="${escapeHtml(collection.name)}"></option>`)
+    .join('');
 }
 
-function renderGroups() {
+function renderCollections() {
+  const mode = state.activeMode;
+  const modeState = getActiveModeState();
+  const config = getModeConfig();
   groupsContainer.innerHTML = '';
 
-  if (state.groups.length === 0) {
-    groupsContainer.innerHTML = '<span class="muted">No hay grupos guardados todavía.</span>';
+  if (modeState.collections.length === 0) {
+    groupsContainer.innerHTML = `<span class="muted">${config.emptyCollectionText}</span>`;
   }
 
-  state.groups.forEach((group, index) => {
+  modeState.collections.forEach((collection, index) => {
     const row = document.createElement('div');
     row.className = 'group-row';
 
-    const composition = group.assets
-      .map(
-        (a) =>
-          `<span class="group-pick" data-pick-value="${a.symbol}" data-symbol="${a.symbol}">${a.symbol}</span> (${a.weight}%)`
-      )
-      .join(' + ');
+    const content =
+      mode === 'pm'
+        ? (collection.assets || [])
+            .map(
+              (asset) =>
+                `<span class="group-pick" data-pick-value="${escapeHtml(asset.symbol)}" data-symbol="${escapeHtml(
+                  asset.symbol
+                )}">${escapeHtml(asset.symbol)}</span> (${formatShortNumber(asset.weight)}%)`
+            )
+            .join(' + ')
+        : (collection.items || []).map((item) => summarizeMpmItem(item)).join(' + ');
 
+    const badge = mode === 'mpm' ? `<span class="badge">MPM</span>` : '';
     row.innerHTML = `
       <div>
-        <strong class="group-pick" data-pick-value="${group.name}">${group.name}</strong>
-        <div class="muted">${composition}</div>
+        <div class="group-card-title">
+          <strong class="group-pick" data-pick-value="${escapeHtml(collection.name)}">${escapeHtml(collection.name)}</strong>
+          ${badge}
+        </div>
+        <div class="muted">${content || 'Sin contenido'}</div>
       </div>
       <div class="group-actions">
-        <button type="button" data-action="components" data-index="${index}">Ver componentes</button>
+        <button type="button" data-action="components" data-index="${index}">${config.viewComponentsLabel}</button>
         <button type="button" data-action="edit" data-index="${index}">Editar</button>
-        <button type="button" data-action="delete" data-index="${index}">Eliminar</button>
+        <button type="button" class="danger" data-action="delete" data-index="${index}">Eliminar</button>
       </div>
     `;
 
@@ -462,7 +826,7 @@ function renderGroups() {
   groupsContainer.querySelectorAll('button[data-action="edit"]').forEach((btn) => {
     btn.addEventListener('click', async () =>
       withButtonProcessing(btn, async () => {
-        editGroup(Number(btn.dataset.index));
+        editCollection(Number(btn.dataset.index));
       })
     );
   });
@@ -470,21 +834,23 @@ function renderGroups() {
   groupsContainer.querySelectorAll('button[data-action="delete"]').forEach((btn) => {
     btn.addEventListener('click', async () =>
       withButtonProcessing(btn, async () => {
-        deleteGroup(Number(btn.dataset.index));
+        deleteCollection(Number(btn.dataset.index));
       })
     );
   });
+
   groupsContainer.querySelectorAll('button[data-action="components"]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       await withButtonProcessing(btn, async () => {
         try {
-          await compareGroupComponents(Number(btn.dataset.index));
+          await compareCollectionComponents(Number(btn.dataset.index));
         } catch (err) {
-          alert(err.message || 'Error mostrando componentes del grupo');
+          alert(err.message || 'Error mostrando componentes');
         }
       });
     });
   });
+
   groupsContainer.querySelectorAll('[data-pick-value]').forEach((el) => {
     el.addEventListener('click', () => {
       fillNextComparisonField(el.dataset.pickValue || '');
@@ -499,18 +865,20 @@ function fillNextComparisonField(value) {
   const raw = String(value || '').trim();
   if (!raw) return;
 
+  const modeState = getActiveModeState();
   const empty = compareFields.find((field) => field && !field.value.trim());
   if (empty) {
     empty.value = raw;
     empty.focus();
+    syncCompareDraftFromInputs();
     return;
   }
 
-  // If all filled, overwrite the first one as fallback.
   if (compareFields[0]) {
     compareFields[0].value = raw;
     compareFields[0].focus();
   }
+  modeState.compareDraft = compareFields.map((field) => field.value || '');
 }
 
 function trimToRange(points, range) {
@@ -525,61 +893,129 @@ function trimToRange(points, range) {
   if (range === '5y') start.setUTCFullYear(start.getUTCFullYear() - 5);
   if (range === '10y') start.setUTCFullYear(start.getUTCFullYear() - 10);
 
-  return points.filter((p) => new Date(p.date + 'T00:00:00Z') >= start);
+  return points.filter((point) => new Date(point.date + 'T00:00:00Z') >= start);
 }
 
 function normalizeTo100(points) {
   if (!points.length) return [];
   const base = points[0].close;
   if (!base) return [];
-  return points.map((p) => ({ date: p.date, value: (p.close / base) * 100 }));
+  return points.map((point) => ({ date: point.date, value: (point.close / base) * 100 }));
 }
 
-function buildCompositeSeries(assets, symbolsData, range) {
-  const prepared = assets
-    .map((asset) => {
-      const series = trimToRange(symbolsData[asset.symbol] || [], range);
-      return {
-        symbol: asset.symbol,
-        weight: Number(asset.weight) / 100,
-        series,
-        byDate: new Map(series.map((p) => [p.date, p.close])),
-        baseClose: series[0]?.close ?? null
-      };
-    })
-    .filter((p) => p.series.length > 0 && p.weight > 0 && p.baseClose);
+function combineWeightedSeries(entries) {
+  const prepared = entries
+    .map((entry) => ({
+      ...entry,
+      byDate: new Map((entry.series || []).map((point) => [point.date, point.value]))
+    }))
+    .filter((entry) => (entry.series || []).length > 0 && entry.weight > 0);
 
   if (prepared.length === 0) return [];
 
-  const allDates = [...new Set(prepared.flatMap((p) => p.series.map((v) => v.date)))].sort();
-  const lastNorm = {};
+  const allDates = [...new Set(prepared.flatMap((entry) => entry.series.map((point) => point.date)))].sort();
+  const lastValues = new Map();
   const result = [];
 
   for (const date of allDates) {
     let weighted = 0;
     let activeWeight = 0;
 
-    for (const asset of prepared) {
-      const close = asset.byDate.get(date);
-      if (close != null) {
-        lastNorm[asset.symbol] = (close / asset.baseClose) * 100;
+    prepared.forEach((entry, index) => {
+      if (entry.byDate.has(date)) {
+        lastValues.set(index, entry.byDate.get(date));
       }
-
-      if (lastNorm[asset.symbol] != null) {
-        weighted += lastNorm[asset.symbol] * asset.weight;
-        activeWeight += asset.weight;
+      const current = lastValues.get(index);
+      if (current != null) {
+        weighted += current * entry.weight;
+        activeWeight += entry.weight;
       }
-    }
+    });
 
     if (activeWeight > 0) {
       result.push({ date, value: weighted / activeWeight });
     }
   }
 
-  if (result.length === 0) return [];
-  const base = result[0].value;
-  if (!base) return [];
-  return result.map((p) => ({ date: p.date, value: (p.value / base) * 100 }));
+  return result;
+}
+
+function buildPmCompositeSeries(assets, symbolsData, range) {
+  const prepared = assets
+    .map((asset) => {
+      const trimmed = trimToRange(symbolsData[asset.symbol] || [], range);
+      const normalizedSeries = normalizeTo100(trimmed);
+      return {
+        symbol: asset.symbol,
+        weight: Number(asset.weight) / 100,
+        series: normalizedSeries
+      };
+    })
+    .filter((entry) => entry.series.length > 0 && entry.weight > 0);
+
+  return combineWeightedSeries(prepared);
+}
+
+function getHoldingEntryPoint(points, holding) {
+  const buyDate = sanitizeDate(holding.buyDate);
+  if (!buyDate) return points[0] || null;
+  return points.find((point) => point.date >= buyDate) || null;
+}
+
+function buildMpmHoldingSeries(points, holding, range) {
+  if (!Array.isArray(points) || points.length === 0) return [];
+  const entryPoint = getHoldingEntryPoint(points, holding);
+  const fallbackBase = entryPoint?.close ?? points[0]?.close;
+  const purchasePrice = holding.purchasePrice != null && holding.purchasePrice > 0 ? holding.purchasePrice : fallbackBase;
+  if (!purchasePrice) return [];
+
+  const startDate = entryPoint?.date || points[0]?.date;
+  const sellDate = sanitizeDate(holding.sellDate);
+  const soldPoint = sellDate ? [...points].reverse().find((point) => point.date <= sellDate) : null;
+  const soldClose = soldPoint?.close ?? null;
+
+  const normalized = points
+    .filter((point) => !startDate || point.date >= startDate)
+    .map((point) => {
+      const effectiveClose = sellDate && soldClose != null && point.date > sellDate ? soldClose : point.close;
+      return {
+        date: point.date,
+        value: (effectiveClose / purchasePrice) * 100
+      };
+    });
+
+  return trimToRange(normalized, range);
+}
+
+function buildMpmCompositeSeries(holdings, symbolsData, range) {
+  const prepared = holdings
+    .map((holding) => {
+      const points = symbolsData[holding.symbol] || [];
+      if (!points.length) return null;
+      const entryPoint = getHoldingEntryPoint(points, holding);
+      const fallbackBase = entryPoint?.close ?? points[0]?.close;
+      const basePerUnit =
+        holding.purchasePrice != null && holding.purchasePrice > 0 ? holding.purchasePrice : fallbackBase;
+      const units = holding.units != null && holding.units > 0 ? holding.units : 1;
+      const baseCost = basePerUnit && units ? basePerUnit * units : 0;
+      return {
+        symbol: holding.symbol,
+        weight: baseCost,
+        series: buildMpmHoldingSeries(points, holding, range)
+      };
+    })
+    .filter(Boolean)
+    .filter((entry) => entry.series.length > 0 && entry.weight > 0);
+
+  const totalWeight = prepared.reduce((sum, entry) => sum + entry.weight, 0);
+  if (!totalWeight) return [];
+
+  return combineWeightedSeries(
+    prepared.map((entry) => ({
+      ...entry,
+      weight: entry.weight / totalWeight
+    }))
+  );
 }
 
 async function getSymbolSeries(symbol) {
@@ -590,11 +1026,11 @@ async function getSymbolSeries(symbol) {
 
   const res = await fetch(`/api/performance?symbol=${encodeURIComponent(symbol)}`);
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     const providerError = err.error || 'error desconocido del proveedor';
     throw new Error(
       `Ticker "${symbol}" reconocido, pero no se pudieron descargar datos de mercado (${providerError}). ` +
-        'Verifica que el ticker exista en Yahoo Finance o prueba el símbolo oficial.'
+        'Verifica que el ticker exista en Yahoo Finance o prueba el simbolo oficial.'
     );
   }
 
@@ -613,26 +1049,26 @@ function alignSeriesCollection(seriesEntries) {
     return { labels: [], datasets: [] };
   }
 
-  const labels = [...new Set(nonEmpty.flatMap((entry) => entry.series.map((p) => p.date)))].sort();
-  const datasets = nonEmpty.map((entry, idx) => {
-    const map = new Map(entry.series.map((p) => [p.date, p.value]));
+  const labels = [...new Set(nonEmpty.flatMap((entry) => entry.series.map((point) => point.date)))].sort();
+  const datasets = nonEmpty.map((entry, index) => {
+    const byDate = new Map(entry.series.map((point) => [point.date, point.value]));
     const data = [];
     let seenStart = false;
     let last = null;
 
-    for (const date of labels) {
-      if (map.has(date)) {
-        last = map.get(date);
+    labels.forEach((date) => {
+      if (byDate.has(date)) {
+        last = byDate.get(date);
         seenStart = true;
       }
       data.push(seenStart ? last : null);
-    }
+    });
 
     return {
       label: entry.label,
       data,
-      borderColor: entry.color || colorForSeries(idx),
-      backgroundColor: entry.color || colorForSeries(idx),
+      borderColor: entry.color || colorForSeries(index),
+      backgroundColor: entry.color || colorForSeries(index),
       borderWidth: 2,
       pointRadius: 0,
       spanGaps: true
@@ -653,7 +1089,7 @@ const htmlLegendPlugin = {
     if (!container) return;
     container.innerHTML = '';
 
-    const allowYoy = new Set(['3y', '5y', '10y']).has(state.activeRange);
+    const allowYoy = new Set(['3y', '5y', '10y']).has(getActiveModeState().activeRange);
     chart.data.datasets.forEach((dataset, index) => {
       const item = document.createElement('div');
       item.className = 'legend-item';
@@ -736,7 +1172,8 @@ function upsertChart(labels, datasets) {
           callbacks: {
             label(context) {
               const rawLabel = context?.dataset?.label || '';
-              const name = state.symbolNames[rawLabel];
+              const symbol = isTickerLabel(rawLabel) ? rawLabel : '';
+              const name = symbol ? state.symbolNames[symbol] : null;
               const value = context?.parsed?.y;
               const valueText = value == null ? '' : `: ${value.toFixed(2)}`;
               if (name) return `${rawLabel} - ${name}${valueText}`;
@@ -787,6 +1224,18 @@ function upsertChart(labels, datasets) {
   renderYoYMessage('YoY', 'Haz click en una serie de la leyenda para ver Year-over-Year.');
 }
 
+function clearVisualization() {
+  if (state.chart) {
+    state.chart.data.labels = [];
+    state.chart.data.datasets = [];
+    state.chart.update();
+  }
+  perfTableBody.innerHTML = '';
+  chartLegend.innerHTML = '';
+  setCompareWarning('');
+  renderYoYMessage('YoY', 'Haz click en una serie de la leyenda para ver Year-over-Year.');
+}
+
 function formatPct(value) {
   if (value == null || Number.isNaN(value)) return '-';
   const sign = value > 0 ? '+' : '';
@@ -796,7 +1245,7 @@ function formatPct(value) {
 function renderYoYMessage(title, message) {
   if (!yoyTableBody || !yoyTitle) return;
   yoyTitle.textContent = title || 'YoY';
-  yoyTableBody.innerHTML = `<tr><td colspan="2">${message}</td></tr>`;
+  yoyTableBody.innerHTML = `<tr><td colspan="2">${escapeHtml(message)}</td></tr>`;
 }
 
 function setCompareWarning(message) {
@@ -806,9 +1255,9 @@ function setCompareWarning(message) {
 
 function buildYoYRows(labels, data) {
   const byYear = new Map();
-  for (let i = 0; i < labels.length; i += 1) {
-    const date = labels[i];
-    const value = data[i];
+  for (let index = 0; index < labels.length; index += 1) {
+    const date = labels[index];
+    const value = data[index];
     if (!date || value == null || Number.isNaN(value)) continue;
     const year = String(date).slice(0, 4);
     if (!/^\d{4}$/.test(year)) continue;
@@ -817,11 +1266,11 @@ function buildYoYRows(labels, data) {
 
   const years = [...byYear.keys()].sort();
   const rows = [];
-  for (let i = 1; i < years.length; i += 1) {
-    const prev = byYear.get(years[i - 1]);
-    const curr = byYear.get(years[i]);
-    if (!prev || !curr) continue;
-    rows.push({ year: years[i], value: ((curr / prev) - 1) * 100 });
+  for (let index = 1; index < years.length; index += 1) {
+    const previous = byYear.get(years[index - 1]);
+    const current = byYear.get(years[index]);
+    if (!previous || !current) continue;
+    rows.push({ year: years[index], value: ((current / previous) - 1) * 100 });
   }
   return rows;
 }
@@ -831,7 +1280,7 @@ function showYoYForDataset(datasetIndex, chartRef) {
   if (!chart || !yoyTableBody || !yoyTitle) return;
 
   const allowed = new Set(['3y', '5y', '10y']);
-  if (!allowed.has(state.activeRange)) {
+  if (!allowed.has(getActiveModeState().activeRange)) {
     renderYoYMessage('YoY', 'Disponible solo para rangos 3Y, 5Y y 10Y.');
     return;
   }
@@ -853,74 +1302,119 @@ function showYoYForDataset(datasetIndex, chartRef) {
   }
 
   yoyTableBody.innerHTML = rows
-    .map((row) => `<tr><td>${row.year}</td><td>${formatPct(row.value)}</td></tr>`)
+    .map((row) => `<tr><td>${escapeHtml(row.year)}</td><td>${formatPct(row.value)}</td></tr>`)
     .join('');
 }
 
-function computePortfolioReturn(portfolio, symbolsData, range) {
-  const series = buildCompositeSeries(portfolio.assets, symbolsData, range);
-  if (!series.length) return null;
-  const last = series[series.length - 1]?.value;
-  if (last == null) return null;
-  return last - 100;
+function findCollectionByName(mode, name, collections = getModeState(mode).collections) {
+  const raw = String(name || '').trim().toLowerCase();
+  return collections.find((collection) => collection.name.toLowerCase() === raw) || null;
 }
 
-function renderPerformanceTable(portfolios, symbolsData) {
-  if (!perfTableBody) return;
-  const rows = portfolios.map((portfolio) => ({
-    label: portfolio.label,
-    symbol:
-      portfolio.assets.length === 1 &&
-      Number(portfolio.assets[0].weight) === 100 &&
-      portfolio.label === portfolio.assets[0].symbol
-        ? portfolio.assets[0].symbol
-        : null,
-    ytd: computePortfolioReturn(portfolio, symbolsData, 'ytd'),
-    oneYear: computePortfolioReturn(portfolio, symbolsData, '1y'),
-    threeYears: computePortfolioReturn(portfolio, symbolsData, '3y')
-  }));
+function expandMpmCollection(collection, collections, seen = new Set(), path = []) {
+  const flattened = [];
+  for (const item of collection.items || []) {
+    if (item.type === 'portfolio') {
+      const ref = findCollectionByName('mpm', item.refName, collections);
+      if (!ref) {
+        throw new Error(`No existe el subset "${item.refName}".`);
+      }
+      const key = ref.name.toLowerCase();
+      if (seen.has(key)) {
+        throw new Error(`Referencia circular detectada: ${[...path, ref.name].join(' -> ')}`);
+      }
+      const nextSeen = new Set(seen);
+      nextSeen.add(key);
+      flattened.push(...expandMpmCollection(ref, collections, nextSeen, [...path, ref.name]));
+      continue;
+    }
 
-  perfTableBody.innerHTML = rows
-    .map(
-      (row) => `
-      <tr>
-        <td>${row.symbol ? `<span data-symbol="${row.symbol}">${row.label}</span>` : row.label}</td>
-        <td>${formatPct(row.ytd)}</td>
-        <td>${formatPct(row.oneYear)}</td>
-        <td>${formatPct(row.threeYears)}</td>
-      </tr>
-    `
-    )
-    .join('');
-  void enrichTickerHover(perfTableBody);
+    flattened.push({
+      type: 'holding',
+      raw: item.raw || item.symbol,
+      symbol: item.symbol,
+      purchasePrice: item.purchasePrice ?? null,
+      units: item.units ?? null,
+      buyDate: item.buyDate || '',
+      sellDate: sanitizeDate(item.sellDate),
+      sourcePath: [...path]
+    });
+  }
+  return flattened;
 }
 
-async function resolveComparisonEntry(value) {
-  const raw = (value || '').trim();
+function formatHoldingLabel(holding, index) {
+  const pathPrefix = Array.isArray(holding.sourcePath) && holding.sourcePath.length
+    ? `${holding.sourcePath.join(' / ')} · `
+    : '';
+  const details = [];
+  if (holding.purchasePrice != null) details.push(`@ ${formatShortNumber(holding.purchasePrice)}`);
+  if (holding.units != null) details.push(`x${formatShortNumber(holding.units)}`);
+  if (holding.buyDate) details.push(`buy ${holding.buyDate}`);
+  if (holding.sellDate) details.push(`sell ${holding.sellDate}`);
+  const suffix = details.length ? ` (${details.join(', ')})` : '';
+  return `${pathPrefix}${holding.symbol}${suffix}${details.length === 0 ? ` #${index + 1}` : ''}`;
+}
+
+async function resolveComparisonEntry(value, mode = state.activeMode) {
+  const raw = String(value || '').trim();
   if (!raw) return null;
 
-  const group = state.groups.find((g) => g.name.toLowerCase() === raw.toLowerCase());
-  if (group) {
+  const collection = findCollectionByName(mode, raw);
+  if (collection) {
+    if (mode === 'pm') {
+      return {
+        label: collection.name,
+        type: 'collection',
+        assets: collection.assets || []
+      };
+    }
+
     return {
-      label: group.name,
-      assets: group.assets
+      label: collection.name,
+      type: 'collection',
+      holdings: expandMpmCollection(
+        collection,
+        getModeState('mpm').collections,
+        new Set([collection.name.toLowerCase()]),
+        []
+      )
     };
   }
 
   const symbol = (await resolveInputToSymbol(raw)).symbol;
+  if (mode === 'pm') {
+    return {
+      label: symbol,
+      type: 'symbol',
+      assets: [{ symbol, weight: 100 }]
+    };
+  }
 
   return {
     label: symbol,
-    assets: [{ symbol, weight: 100 }]
+    type: 'symbol',
+    holdings: [
+      {
+        type: 'holding',
+        raw: symbol,
+        symbol,
+        purchasePrice: null,
+        units: 1,
+        buyDate: '',
+        sellDate: '',
+        sourcePath: []
+      }
+    ]
   };
 }
 
-async function resolveComparisonEntrySafe(value) {
+async function resolveComparisonEntrySafe(value, mode) {
   try {
-    const entry = await resolveComparisonEntry(value);
+    const entry = await resolveComparisonEntry(value, mode);
     return { entry, error: null };
   } catch (err) {
-    return { entry: null, error: err?.message || 'No se pudo resolver la selección' };
+    return { entry: null, error: err?.message || 'No se pudo resolver la seleccion' };
   }
 }
 
@@ -937,42 +1431,99 @@ async function loadSymbolsDataSafe(symbols) {
   return { symbolsData, failed };
 }
 
-async function compareMixed() {
-  const rawValues = compareFields.map((field) => field.value.trim());
-  const resolvedEntries = await Promise.all(rawValues.map((value) => resolveComparisonEntrySafe(value)));
-  const resolveErrors = resolvedEntries.filter((x) => x.error).map((x) => x.error);
-  const portfolios = resolvedEntries.map((x) => x.entry).filter(Boolean);
-
-  if (portfolios.length < 1) {
-    alert('No se pudo resolver ninguna selección válida.');
-    return;
+function buildEntrySeries(entry, symbolsData, range, mode = state.activeMode) {
+  if (mode === 'pm') {
+    return buildPmCompositeSeries(entry.assets || [], symbolsData, range);
   }
+  return buildMpmCompositeSeries(entry.holdings || [], symbolsData, range);
+}
 
-  if (portfolios.length > 4) {
-    alert('Máximo 4 elementos en la comparación.');
-    return;
-  }
+function computeEntryReturn(entry, symbolsData, range, mode = state.activeMode) {
+  const series = buildEntrySeries(entry, symbolsData, range, mode);
+  if (!series.length) return null;
+  const first = series[0]?.value;
+  const last = series[series.length - 1]?.value;
+  if (first == null || last == null || first === 0) return null;
+  return mode === 'pm' ? last - 100 : ((last / first) - 1) * 100;
+}
 
-  const symbols = [...new Set(portfolios.flatMap((p) => p.assets.map((a) => a.symbol)))];
-  const { symbolsData, failed } = await loadSymbolsDataSafe(symbols);
-
-  const directSymbols = portfolios
-    .filter(
-      (p) =>
-        p.assets.length === 1 && Number(p.assets[0].weight) === 100 && isTickerLabel(p.assets[0].symbol)
-    )
-    .map((p) => p.assets[0].symbol);
-  await Promise.all(directSymbols.map((s) => ensureSymbolName(s)));
-
-  const seriesEntries = portfolios.map((portfolio, idx) => ({
-    label: portfolio.label,
-    color: colorForSeries(idx),
-    series: buildCompositeSeries(portfolio.assets, symbolsData, state.activeRange)
+function renderPerformanceTable(entries, symbolsData, mode = state.activeMode) {
+  if (!perfTableBody) return;
+  const rows = entries.map((entry) => ({
+    label: entry.label,
+    symbol:
+      entry.type === 'symbol' &&
+      ((mode === 'pm' && entry.assets?.length === 1) || (mode === 'mpm' && entry.holdings?.length === 1))
+        ? entry.label
+        : null,
+    ytd: computeEntryReturn(entry, symbolsData, 'ytd', mode),
+    oneYear: computeEntryReturn(entry, symbolsData, '1y', mode),
+    threeYears: computeEntryReturn(entry, symbolsData, '3y', mode)
   }));
 
-  const plottable = seriesEntries.filter((s) => s.series.length > 0);
+  perfTableBody.innerHTML = rows
+    .map(
+      (row) => `
+      <tr>
+        <td>${row.symbol ? `<span data-symbol="${escapeHtml(row.symbol)}">${escapeHtml(row.label)}</span>` : escapeHtml(
+          row.label
+        )}</td>
+        <td>${formatPct(row.ytd)}</td>
+        <td>${formatPct(row.oneYear)}</td>
+        <td>${formatPct(row.threeYears)}</td>
+      </tr>
+    `
+    )
+    .join('');
+  void enrichTickerHover(perfTableBody);
+}
+
+function syncCompareDraftFromInputs() {
+  getActiveModeState().compareDraft = compareFields.map((field) => field.value || '');
+}
+
+async function compareMixed(mode = state.activeMode) {
+  const modeState = getModeState(mode);
+  const rawValues = compareFields.map((field) => field.value.trim());
+  modeState.compareDraft = [...rawValues];
+
+  const resolvedEntries = await Promise.all(rawValues.map((value) => resolveComparisonEntrySafe(value, mode)));
+  const resolveErrors = resolvedEntries.filter((entry) => entry.error).map((entry) => entry.error);
+  const entries = resolvedEntries.map((entry) => entry.entry).filter(Boolean);
+
+  if (entries.length < 1) {
+    alert('No se pudo resolver ninguna seleccion valida.');
+    return;
+  }
+
+  if (entries.length > 4) {
+    alert('Maximo 4 elementos en la comparacion.');
+    return;
+  }
+
+  const symbols = [
+    ...new Set(
+      entries.flatMap((entry) =>
+        mode === 'pm'
+          ? (entry.assets || []).map((asset) => asset.symbol)
+          : (entry.holdings || []).map((holding) => holding.symbol)
+      )
+    )
+  ];
+  const { symbolsData, failed } = await loadSymbolsDataSafe(symbols);
+
+  const directSymbols = entries.filter((entry) => entry.type === 'symbol').map((entry) => entry.label);
+  await Promise.all(directSymbols.map((symbol) => ensureSymbolName(symbol)));
+
+  const seriesEntries = entries.map((entry, index) => ({
+    label: entry.label,
+    color: colorForSeries(index),
+    series: buildEntrySeries(entry, symbolsData, modeState.activeRange, mode)
+  }));
+
+  const plottable = seriesEntries.filter((entry) => entry.series.length > 0);
   if (plottable.length < 1) {
-    throw new Error('No hay datos disponibles para graficar las selecciones válidas.');
+    throw new Error('No hay datos disponibles para graficar las selecciones validas.');
   }
 
   const { labels, datasets } = alignSeriesCollection(seriesEntries);
@@ -981,8 +1532,9 @@ async function compareMixed() {
   }
 
   upsertChart(labels, datasets);
-  renderPerformanceTable(portfolios, symbolsData);
-  const failedSymbols = failed.map((f) => f.symbol);
+  renderPerformanceTable(entries, symbolsData, mode);
+
+  const failedSymbols = failed.map((item) => item.symbol);
   if (resolveErrors.length > 0 || failedSymbols.length > 0) {
     const parts = [];
     if (resolveErrors.length > 0) parts.push(`${resolveErrors.length} entrada(s) no resueltas`);
@@ -991,119 +1543,310 @@ async function compareMixed() {
   } else {
     setCompareWarning('');
   }
-  state.lastCompare = {
+
+  modeState.lastCompare = {
     type: 'mixed',
     values: rawValues
   };
 }
 
-async function compareGroupComponents(groupIndex) {
-  const group = state.groups[groupIndex];
-  if (!group) {
-    throw new Error('Grupo no encontrado.');
+async function compareCollectionComponents(index, mode = state.activeMode) {
+  const collection = getModeState(mode).collections[index];
+  if (!collection) {
+    throw new Error('Elemento no encontrado.');
   }
 
-  const symbols = [...new Set(group.assets.map((a) => a.symbol))];
+  let entries;
+  if (mode === 'pm') {
+    entries = (collection.assets || []).map((asset) => ({
+      label: asset.symbol,
+      type: 'symbol',
+      assets: [{ symbol: asset.symbol, weight: 100 }]
+    }));
+  } else {
+    const holdings = expandMpmCollection(
+      collection,
+      getModeState('mpm').collections,
+      new Set([collection.name.toLowerCase()]),
+      []
+    );
+    entries = holdings.map((holding, indexInPortfolio) => ({
+      label: formatHoldingLabel(holding, indexInPortfolio),
+      type: 'holding',
+      holdings: [{ ...holding }]
+    }));
+  }
 
-  const portfolios = symbols.map((symbol) => ({
-    label: symbol,
-    assets: [{ symbol, weight: 100 }]
-  }));
+  const symbols = [
+    ...new Set(
+      entries.flatMap((entry) =>
+        mode === 'pm'
+          ? (entry.assets || []).map((asset) => asset.symbol)
+          : (entry.holdings || []).map((holding) => holding.symbol)
+      )
+    )
+  ];
 
   const { symbolsData, failed } = await loadSymbolsDataSafe(symbols);
-  await Promise.all(symbols.map((s) => ensureSymbolName(s)));
+  await Promise.all(symbols.map((symbol) => ensureSymbolName(symbol)));
 
-  const seriesEntries = portfolios.map((portfolio, idx) => ({
-    label: portfolio.label,
-    color: colorForSeries(idx),
-    series: buildCompositeSeries(portfolio.assets, symbolsData, state.activeRange)
+  const seriesEntries = entries.map((entry, indexInList) => ({
+    label: entry.label,
+    color: colorForSeries(indexInList),
+    series: buildEntrySeries(entry, symbolsData, getModeState(mode).activeRange, mode)
   }));
 
   const { labels, datasets } = alignSeriesCollection(seriesEntries);
   if (!labels.length) {
-    throw new Error('No hay datos disponibles para los componentes del grupo en el rango seleccionado.');
+    throw new Error('No hay datos disponibles para los componentes en el rango seleccionado.');
   }
 
   upsertChart(labels, datasets);
-  renderPerformanceTable(portfolios, symbolsData);
+  renderPerformanceTable(entries, symbolsData, mode);
   if (failed.length > 0) {
-    setCompareWarning(
-      `Advertencia: algunos componentes no tienen datos (${failed.map((f) => f.symbol).join(', ')}).`
-    );
+    setCompareWarning(`Advertencia: algunos componentes no tienen datos (${failed.map((item) => item.symbol).join(', ')}).`);
   } else {
     setCompareWarning('');
   }
-  state.lastCompare = {
-    type: 'group-components',
-    groupIndex
+
+  getModeState(mode).lastCompare = {
+    type: 'collection-components',
+    index
   };
+}
+
+function validatePmDraft(items) {
+  const validAssets = items.filter((asset) => Number(asset.weight) > 0);
+  if (validAssets.length === 0) {
+    throw new Error('Asigna al menos un peso mayor a 0.');
+  }
+
+  const totalWeight = validAssets.reduce((sum, asset) => sum + Number(asset.weight), 0);
+  if (totalWeight <= 0) {
+    throw new Error('Los pesos deben sumar mas de 0%.');
+  }
+
+  return validAssets.map((asset) => ({
+    symbol: asset.symbol,
+    weight: Number(((Number(asset.weight) / totalWeight) * 100).toFixed(4))
+  }));
+}
+
+function normalizeMpmDraftItems(items) {
+  const normalized = items
+    .map((item) => {
+      if (item.type === 'portfolio') {
+        const refName = String(item.refName || '').trim();
+        return refName ? { type: 'portfolio', refName } : null;
+      }
+
+      const purchasePrice = item.purchasePrice != null && item.purchasePrice > 0 ? Number(item.purchasePrice) : null;
+      const units = item.units != null && item.units > 0 ? Number(item.units) : null;
+      const buyDate = item.buyDate ? sanitizeDate(item.buyDate) : '';
+      const sellDate = item.sellDate ? sanitizeDate(item.sellDate) : '';
+      if (buyDate && sellDate && sellDate < buyDate) {
+        throw new Error(`La fecha de venta no puede ser anterior a la fecha de compra para ${item.symbol}.`);
+      }
+      return {
+        type: 'holding',
+        raw: item.raw || item.symbol,
+        symbol: item.symbol,
+        purchasePrice,
+        units,
+        buyDate,
+        sellDate
+      };
+    })
+    .filter(Boolean);
+
+  if (normalized.length === 0) {
+    throw new Error('Agrega al menos un holding o subset al portfolio.');
+  }
+
+  return normalized;
+}
+
+function buildUpdatedCollectionList(mode, candidate) {
+  const modeState = getModeState(mode);
+  const nextCollections = [...modeState.collections];
+  if (modeState.editingIndex != null && nextCollections[modeState.editingIndex]) {
+    nextCollections[modeState.editingIndex] = candidate;
+    return nextCollections;
+  }
+
+  const existingIndex = nextCollections.findIndex(
+    (collection) => collection.name.toLowerCase() === candidate.name.toLowerCase()
+  );
+  if (existingIndex >= 0) {
+    nextCollections[existingIndex] = candidate;
+  } else {
+    nextCollections.push(candidate);
+  }
+  return nextCollections;
+}
+
+async function restoreLastComparison(mode = state.activeMode) {
+  const modeState = getModeState(mode);
+  if (!modeState.lastCompare) {
+    clearVisualization();
+    return;
+  }
+
+  try {
+    if (modeState.lastCompare.type === 'mixed') {
+      compareFields.forEach((field, index) => {
+        field.value = modeState.lastCompare.values[index] || '';
+      });
+      await compareMixed(mode);
+    } else if (modeState.lastCompare.type === 'collection-components') {
+      await compareCollectionComponents(modeState.lastCompare.index, mode);
+    }
+  } catch (err) {
+    setCompareWarning(err.message || 'No se pudo restaurar la comparacion.');
+  }
+}
+
+function renderModeUi() {
+  const mode = state.activeMode;
+  const modeState = getActiveModeState();
+  const config = getModeConfig();
+
+  saveLocal('activeMode', mode);
+
+  modeSwitch.querySelectorAll('[data-mode]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.mode === mode);
+  });
+
+  modeTitle.textContent = config.title;
+  modeSubtitle.textContent = config.subtitle;
+  builderTitle.textContent = config.builderTitle;
+  builderHint.textContent = config.builderHint;
+  input.placeholder = config.builderPlaceholder;
+  collectionTitle.textContent = config.collectionTitle;
+  collectionHint.textContent = config.collectionHint;
+  groupName.placeholder = config.namePlaceholder;
+  compareTitle.textContent = config.compareTitle;
+  compareHint.textContent = config.compareHint;
+  detectBtn.textContent = config.detectLabel;
+  saveGroupBtn.textContent = modeState.editingIndex == null ? config.saveLabel : config.updateLabel;
+  runCompareBtn.textContent = config.compareButtonLabel;
+  clearCompareBtn.textContent = config.clearButtonLabel;
+  subsetBuilder.classList.toggle('hidden', mode !== 'mpm');
+  perfHeadLabel.textContent = 'Seleccion';
+  perfHeadYtd.textContent = 'YTD';
+  perfHead1y.textContent = '1Y';
+  perfHead3y.textContent = '3Y';
+
+  compareFields.forEach((field, index) => {
+    const suffix = index === 0 ? '1' : String(index + 1);
+    field.placeholder = `Campo ${suffix}: ${config.comparePlaceholderBase}${index > 1 ? ' (opcional)' : ''}`;
+    field.value = modeState.compareDraft[index] || '';
+  });
+
+  input.value = modeState.rawInput || '';
+  groupName.value = modeState.draftName || '';
+  document
+    .querySelectorAll('#rangeButtons button')
+    .forEach((button) => button.classList.toggle('active', button.dataset.range === modeState.activeRange));
+
+  detectInfo.textContent = '';
+  renderAssetsDraft();
+  renderCollections();
 }
 
 detectBtn.addEventListener('click', async () => {
   await withButtonProcessing(detectBtn, async () => {
-    const { assets, unresolved } = await detectAssetsFromText(input.value);
-    state.assetsDraft = assets;
+    const modeState = getActiveModeState();
+    modeState.rawInput = input.value;
+    const detector = state.activeMode === 'pm' ? detectAssetsFromText : detectHoldingsFromText;
+    const { items, unresolved } = await detector(input.value);
+
+    if (state.activeMode === 'pm') {
+      modeState.draftItems = items;
+    } else {
+      const subsets = modeState.draftItems.filter((item) => item.type === 'portfolio');
+      modeState.draftItems = [...items, ...subsets];
+    }
+
     renderAssetsDraft();
-    detectInfo.textContent = `${assets.length} activo(s) detectado(s).`;
+    detectInfo.textContent = `${items.length} ${getModeConfig().itemDetectedLabel}.`;
     if (unresolved.length > 0) {
-      detectInfo.textContent += ` No resueltos: ${unresolved.slice(0, 3).join(', ')}${unresolved.length > 3 ? '...' : ''}.`;
+      detectInfo.textContent += ` No resueltos: ${unresolved.slice(0, 3).join(', ')}${
+        unresolved.length > 3 ? '...' : ''
+      }.`;
     }
   });
 });
 
 saveGroupBtn.addEventListener('click', async () => {
   await withButtonProcessing(saveGroupBtn, async () => {
+    const mode = state.activeMode;
+    const modeState = getActiveModeState();
     const name = groupName.value.trim();
+    modeState.draftName = name;
+    modeState.rawInput = input.value;
+
     if (!name) {
-      alert('Indica un nombre para el grupo.');
+      alert(`Indica un nombre para el ${getModeConfig().collectionSingular}.`);
       return;
     }
 
-    if (state.assetsDraft.length === 0) {
-      alert('Primero detecta activos en el texto.');
+    if (modeState.draftItems.length === 0) {
+      alert(
+        mode === 'pm'
+          ? 'Primero detecta activos en el texto.'
+          : 'Primero detecta holdings o agrega subsets al borrador.'
+      );
       return;
     }
 
-    const validAssets = state.assetsDraft.filter((a) => a.weight > 0);
-    if (validAssets.length === 0) {
-      alert('Asigna al menos un peso mayor a 0.');
-      return;
-    }
-
-    const totalWeight = validAssets.reduce((sum, a) => sum + Number(a.weight), 0);
-    if (totalWeight <= 0) {
-      alert('Los pesos deben sumar más de 0%.');
-      return;
-    }
-
-    const normalizedAssets = validAssets.map((a) => ({
-      symbol: a.symbol,
-      weight: Number(((Number(a.weight) / totalWeight) * 100).toFixed(4))
-    }));
-
-    if (state.editingGroupIndex != null && state.groups[state.editingGroupIndex]) {
-      state.groups[state.editingGroupIndex] = { name, assets: normalizedAssets };
-    } else {
-      const existing = state.groups.findIndex((g) => g.name.toLowerCase() === name.toLowerCase());
-      if (existing >= 0) {
-        state.groups[existing] = { name, assets: normalizedAssets };
+    try {
+      let candidate;
+      if (mode === 'pm') {
+        candidate = { name, assets: validatePmDraft(modeState.draftItems) };
       } else {
-        state.groups.push({ name, assets: normalizedAssets });
+        candidate = { name, items: normalizeMpmDraftItems(modeState.draftItems) };
+        const nextCollections = buildUpdatedCollectionList('mpm', candidate);
+        expandMpmCollection(candidate, nextCollections, new Set([name.toLowerCase()]), []);
       }
+
+      modeState.collections = buildUpdatedCollectionList(mode, candidate);
+      persistModeCollections(mode);
+      renderCollections();
+      resetCollectionEditor();
+    } catch (err) {
+      alert(err.message || 'No se pudo guardar.');
+    }
+  });
+});
+
+addSubsetBtn?.addEventListener('click', async () => {
+  await withButtonProcessing(addSubsetBtn, async () => {
+    if (state.activeMode !== 'mpm') return;
+    const refName = String(subsetPortfolioInput.value || '').trim();
+    if (!refName) {
+      alert('Indica un portfolio existente para agregarlo como subset.');
+      return;
     }
 
-    saveLocal('groups', state.groups);
-    renderGroups();
-    resetGroupEditor();
+    const ref = findCollectionByName('mpm', refName);
+    if (!ref) {
+      alert(`No existe un portfolio llamado "${refName}".`);
+      return;
+    }
+
+    getActiveModeState().draftItems.push({ type: 'portfolio', refName: ref.name });
+    subsetPortfolioInput.value = '';
+    renderAssetsDraft();
   });
 });
 
 runCompareBtn.addEventListener('click', async () => {
   await withButtonProcessing(runCompareBtn, async () => {
     try {
-      await compareMixed();
+      await compareMixed(state.activeMode);
     } catch (err) {
-      alert(err.message || 'Error comparando selección');
+      alert(err.message || 'Error comparando seleccion');
     }
   });
 });
@@ -1111,34 +1854,35 @@ runCompareBtn.addEventListener('click', async () => {
 clearCompareBtn?.addEventListener('click', async () => {
   await withButtonProcessing(clearCompareBtn, async () => {
     compareFields.forEach((field) => {
-      if (field) field.value = '';
+      field.value = '';
     });
-    state.lastCompare = null;
+    getActiveModeState().compareDraft = ['', '', '', ''];
+    getActiveModeState().lastCompare = null;
     setCompareWarning('');
     renderYoYMessage('YoY', 'Haz click en una serie de la leyenda para ver Year-over-Year.');
   });
 });
 
-rangeButtons.addEventListener('click', async (e) => {
-  const btn = e.target.closest('button[data-range]');
-  if (!btn) return;
+rangeButtons.addEventListener('click', async (event) => {
+  const button = event.target.closest('button[data-range]');
+  if (!button) return;
 
-  state.activeRange = btn.dataset.range;
+  getActiveModeState().activeRange = button.dataset.range;
   document
     .querySelectorAll('#rangeButtons button')
-    .forEach((el) => el.classList.toggle('active', el === btn));
+    .forEach((element) => element.classList.toggle('active', element === button));
 
-  if (!state.lastCompare) return;
+  if (!getActiveModeState().lastCompare) return;
 
-  await withButtonProcessing(btn, async () => {
+  await withButtonProcessing(button, async () => {
     try {
-      if (state.lastCompare.type === 'mixed') {
-        compareFields.forEach((field, idx) => {
-          field.value = state.lastCompare.values[idx] || '';
+      if (getActiveModeState().lastCompare.type === 'mixed') {
+        compareFields.forEach((field, index) => {
+          field.value = getActiveModeState().lastCompare.values[index] || '';
         });
-        await compareMixed();
-      } else if (state.lastCompare.type === 'group-components') {
-        await compareGroupComponents(state.lastCompare.groupIndex);
+        await compareMixed(state.activeMode);
+      } else if (getActiveModeState().lastCompare.type === 'collection-components') {
+        await compareCollectionComponents(getActiveModeState().lastCompare.index, state.activeMode);
       }
     } catch (err) {
       alert(err.message || 'No se pudo refrescar el rango');
@@ -1146,5 +1890,26 @@ rangeButtons.addEventListener('click', async (e) => {
   });
 });
 
-renderGroups();
-resetGroupEditor();
+modeSwitch.addEventListener('click', async (event) => {
+  const button = event.target.closest('button[data-mode]');
+  if (!button || button.dataset.mode === state.activeMode) return;
+
+  state.activeMode = button.dataset.mode;
+  renderModeUi();
+  await restoreLastComparison(state.activeMode);
+});
+
+input.addEventListener('input', () => {
+  getActiveModeState().rawInput = input.value;
+});
+
+groupName.addEventListener('input', () => {
+  getActiveModeState().draftName = groupName.value;
+});
+
+compareFields.forEach((field) => {
+  field.addEventListener('input', syncCompareDraftFromInputs);
+});
+
+renderModeUi();
+restoreLastComparison(state.activeMode);

@@ -1,211 +1,349 @@
-# DESIGN.md - Especificación Completa para Recrear la App Desde Cero
+# DESIGN.md - Especificación Funcional
 
-Este documento define todo lo necesario para que cualquier IA pueda reconstruir la app sin acceder al código original.
+Este documento define el comportamiento esperado de la app actual para poder recrearla desde cero sin ver el código original.
 
 ## 1) Objetivo
 
-Construir una web app que permita:
+Construir una web app con dos modos paralelos:
 
-1. Resolver texto libre a activos financieros.
-2. Crear grupos ponderados de activos.
-3. Comparar tickers y/o grupos en un gráfico interactivo.
-4. Analizar resumen de performance y YoY por serie.
-5. Minimizar llamadas externas con cachés locales.
+1. `Performance measure` (PM)
+2. `My performance measure` (MPM)
 
-## 2) Funcionalidades obligatorias
+La app debe permitir:
 
-### 2.1 Entrada multilinea y pesos
+- resolver identificadores financieros
+- crear estructuras compuestas (`grupos` en PM, `portfolios` en MPM)
+- comparar una o varias selecciones en gráfico interactivo
+- calcular tabla resumen y YoY
+- minimizar llamadas externas con cachés locales
 
-- Campo textarea para pegar líneas.
-- Cada línea soporta:
-  - `valor`
-  - `valor, peso`
-  - `valor; peso`
-  - `valor | peso`
-  - `valor 25%`
-- `valor` puede ser ticker o nombre de activo.
+## 2) Modos funcionales
+
+### 2.1 PM
+
+PM debe permitir:
+
+- pegar texto libre/multilínea
+- detectar activos
+- asignar pesos
+- guardar grupos compuestos
+- comparar tickers y grupos
+- ver componentes de un grupo como series individuales
+
+### 2.2 MPM
+
+MPM debe permitir:
+
+- registrar holdings reales
+- guardar portfolios
+- reutilizar portfolios guardados como `subsets`
+- comparar portfolios, subsets y stocks directos
+
+Cada holding puede tener:
+
+- `symbol`
+- `purchasePrice` opcional
+- `units` opcional
+- `buyDate` opcional
+- `sellDate` opcional
+
+Reglas:
+
+- `buyDate` define el primer punto desde el cual la posición entra al cálculo.
+- `sellDate` congela el valor de la posición desde esa fecha.
+- si `sellDate < buyDate`, debe rechazarse el draft.
+
+## 3) Resolución de símbolos
+
+### 3.1 Tipos aceptados
+
+La app debe aceptar:
+
+- ticker
+- alias local
+- WKN
+- ISIN
+- texto libre
+
+### 3.2 Orden de resolución
+
+1. Alias local
+2. Ticker directo
+3. Yahoo Finance Search
+4. OpenFIGI para inputs con forma de WKN/ISIN si Yahoo no devuelve resultado
+
+### 3.3 Reglas de identificación
+
+- WKN-like: 6 caracteres alfanuméricos
+- ISIN-like: 12 caracteres con prefijo país y dígito final de control
+- Inputs WKN/ISIN no deben truncarse a un ticker corto falso.
+
+### 3.4 Fallback OpenFIGI
+
+Cuando Yahoo Search no resuelve un WKN/ISIN:
+
+- consultar OpenFIGI `/v3/mapping`
+- usar `ID_WERTPAPIER` para WKN
+- usar `ID_ISIN` para ISIN
+- convertir el ticker resultante a formato Yahoo si es necesario (`/` -> `-`, sufijos por exchange, etc.)
+- verificar que el símbolo final tenga datos en Yahoo Chart antes de aceptarlo
+
+## 4) PM - Entrada multilinea y pesos
+
+Cada línea soporta:
+
+- `valor`
+- `valor, peso`
+- `valor; peso`
+- `valor | peso`
+- `valor 25%`
 
 Reglas de pesos del draft:
-- Sin pesos explícitos: reparto equitativo al 100%.
-- Con pesos mixtos: pesos explícitos + reparto del remanente entre implícitos.
 
-### 2.2 Resolución de símbolos
+- sin pesos explícitos: reparto equitativo al 100%
+- con pesos mixtos: pesos explícitos + reparto del remanente entre implícitos
+- al guardar grupo, normalizar al 100%
 
-Orden de resolución:
-1. Alias local.
-2. Ticker directo (solo si no es frase multi-palabra para evitar falsos positivos).
-3. Backend `/api/resolve?query=...`.
+## 5) MPM - Entrada de holdings
 
-Cachés:
-- Cliente: `resolveCache`, `symbolNames` en localStorage.
-- Servidor: `resolve-cache.json` con TTL (30 días recomendado).
+Formato flexible por línea. Debe soportar variantes como:
 
-### 2.3 Gestión de grupos
+- `AAPL, 182.4, 12`
+- `AAPL, price=182.4, units=12`
+- `AAPL, price=182.4, units=12, buyDate=2025-01-10`
+- `AAPL, 182.4, 12, 2025-01-10`
+- `NVDA, price=610, units=4, buyDate=2025-02-01, sell=2025-09-20`
 
-- Crear grupo.
-- Editar grupo.
-  - Debe rellenar textarea como `TICKER, PESO` por línea.
-- Eliminar grupo.
-- Ver componentes del grupo (sin límite de activos).
+Interpretación:
 
-### 2.4 Interacciones rápidas desde grupos
+- primer token: activo o identificador a resolver
+- numéricos: `purchasePrice`, luego `units`
+- fechas: primero `buyDate`, luego `sellDate` si no vienen nombradas
 
-- Click en nombre de grupo => autocompleta el siguiente campo vacío en comparación.
-- Click en ticker componente => autocompleta el siguiente campo vacío en comparación.
-- Si no hay campos vacíos, sobrescribir el primer campo.
+## 6) Gestión de estructuras
 
-### 2.5 Comparación unificada
+### 6.1 PM
 
-- 4 campos (`campo1..campo4`), mínimo 2 no vacíos.
-- Cada campo acepta:
-  - ticker
-  - nombre exacto de grupo
-- Botones:
-  - `Comparar selección`
-  - `Limpiar selección`
+CRUD de grupos:
 
-### 2.6 Rango temporal
+- crear
+- editar
+- eliminar
+- ver componentes
 
-- Botones: `YTD`, `1Y`, `3Y`, `5Y`, `10Y`.
-- Al cambiar rango se debe recalcular la vista activa:
-  - comparación unificada o
-  - vista de componentes de grupo.
+### 6.2 MPM
 
-### 2.7 Gráfico y leyenda
+CRUD de portfolios:
 
-- Chart.js line chart base 100.
-- Zoom habilitado (wheel/drag/pinch).
-- Pan deshabilitado para evitar desplazamiento lateral involuntario.
-- Leyenda custom HTML (no la nativa):
-  - click en nombre de serie => toggle visible/oculta (comportamiento estándar)
-  - click en `(YoY)` => mostrar YoY de esa serie
+- crear
+- editar
+- eliminar
+- ver holdings
 
-### 2.8 Tabla de resumen y tabla YoY
+Portfolios MPM pueden contener:
 
-Tabla resumen (siempre tras comparar):
-- columnas: `Selección`, `YTD`, `1Y`, `3Y`
+- holdings directos
+- referencias a otros portfolios (`subsets`)
 
-Tabla YoY:
-- se llena al click en `(YoY)` de la leyenda
-- solo aplica a rangos `3Y`, `5Y`, `10Y`
-- en `YTD` o `1Y`: mostrar mensaje de no disponibilidad
+Debe detectarse referencia circular entre portfolios.
 
-### 2.9 Hover con nombre largo
+## 7) Comparación
 
-Cuando se hace hover sobre ticker en:
-- lista draft,
-- sección de grupos,
-- tabla de resumen,
-- tooltip del gráfico,
+### 7.1 Reglas generales
 
-mostrar nombre largo del activo.
+- 4 campos máximo
+- mínimo 1 selección válida
+- el botón de acción debe permitir ejecutar también con una sola selección
+- copy actual del botón: `Analizar seleccion`
 
-Si no está cacheado:
-- mostrar estado de resolución y
-- resolver en background al hover.
+### 7.2 Entradas permitidas por modo
 
-### 2.10 Feedback de procesamiento
+PM:
 
-Todo botón con acción debe mostrar temporalmente `Procesando...`:
-- detectar,
-- guardar/actualizar,
-- comparar,
-- limpiar,
-- botones de rango,
-- acciones de grupos.
+- ticker
+- WKN
+- ISIN
+- nombre exacto de grupo
 
-## 3) Backend requerido (Node + Express)
+MPM:
 
-Endpoints:
-1. `GET /api/performance?symbol=...`
-2. `GET /api/performance/batch?symbols=a,b,c`
-3. `GET /api/resolve?query=...`
+- ticker
+- WKN
+- ISIN
+- nombre exacto de portfolio
+- nombre exacto de subset
 
-Datos:
-- Yahoo chart endpoint para histórico.
-- Yahoo search endpoint para resolución de texto.
+### 7.3 Interacciones rápidas
 
-Caché mercado:
-- archivo por símbolo en `.cache/market-data`.
-- actualización incremental (pedir solo faltantes).
+Click en nombre de grupo/portfolio o en componente/holding:
 
-Caché resolución:
-- `.cache/resolve-cache.json`.
+- rellena el siguiente campo vacío
+- si todos están ocupados, sobrescribe el primer campo
 
-## 4) Frontend requerido (Vanilla)
+## 8) Serie compuesta
 
-Estado mínimo:
-- `groups`
-- `assetsDraft`
-- `marketCache` (solo memoria)
-- `resolveCache` (localStorage)
-- `symbolNames` (localStorage)
-- `activeRange`
-- `lastCompare`
-- `editingGroupIndex`
+### 8.1 PM
 
-Persistencia:
-- guardar `groups`, `resolveCache`, `symbolNames`
-- nunca persistir series históricas grandes en localStorage
+Para un grupo ponderado:
 
-## 5) Algoritmos clave
-
-### 5.1 Serie compuesta
-
-Para un portafolio ponderado:
 1. filtrar por rango
 2. normalizar cada activo a base 100
 3. unir fechas
 4. forward-fill por activo desde su inicio
 5. promedio ponderado por peso activo
-6. rebase final a 100 en primer punto
+6. rebase final a 100 en el primer punto
 
-### 5.2 Alineación multi-serie
+### 8.2 MPM
 
-- unir fechas de todas las series
-- para cada serie:
-  - `null` antes de su inicio
-  - forward-fill después
+Para un portfolio:
 
-### 5.3 YoY
+1. expandir subsets a holdings finales
+2. determinar fecha de entrada por holding (`buyDate` o primer dato disponible)
+3. determinar costo base por holding:
+   - `purchasePrice * units`, o
+   - fallback a primer precio disponible * `units` si falta `purchasePrice`
+4. construir serie individual del holding:
+   - empieza en `buyDate`/primer dato
+   - si hay `sellDate`, mantener valor fijo después de esa fecha
+5. combinar holdings con promedio ponderado por costo base
 
-- tomar valores de cierre de cada año (o último punto disponible del año en la serie)
-- calcular `(año_actual / año_previo - 1) * 100`
-- renderizar por fila `Año`, `Retorno`
+## 9) Rango temporal
 
-## 6) UX / Mensajes
+Botones:
 
-Mensajes explícitos para:
-- símbolo no resoluble
-- ticker reconocido sin datos
-- menos de 2 elementos en comparación
-- YoY no disponible en rango actual
+- `YTD`
+- `1Y`
+- `3Y`
+- `5Y`
+- `10Y`
 
-## 7) Testing mínimo
+Al cambiar rango se recalcula la vista activa:
 
-Pruebas automatizadas (Vitest + JSDOM) deben cubrir:
-1. comparación mixta grupo+ticker
-2. 5Y no truncado por activo con historia corta
-3. ver componentes sin límite
-4. resolución de texto libre (`EXXON -> XOM`)
-5. parsing de segunda columna de pesos
-6. tabla resumen con filas correctas
-7. click `(YoY)` en 5Y muestra datos
-8. click `(YoY)` en YTD muestra mensaje de no disponible
-9. click nombre de serie en leyenda hace toggle visible/oculta
-10. click en grupo/componente rellena siguiente campo en comparación
-11. botón limpiar selección vacía inputs
+- comparación unificada, o
+- vista de componentes/holdings
 
-## 8) Criterios de aceptación
+## 10) Gráfico y leyenda
+
+- Chart.js line chart
+- base visual 100
+- zoom habilitado (`wheel`, `drag`, `pinch`)
+- pan deshabilitado
+- leyenda HTML custom
+
+Interacciones de leyenda:
+
+- click en nombre de serie => toggle visible/oculta
+- click en `(YoY)` => render de YoY para esa serie
+
+## 11) Tablas
+
+### 11.1 Resumen
+
+Columnas:
+
+- `Seleccion`
+- `YTD`
+- `1Y`
+- `3Y`
+
+### 11.2 YoY
+
+- disponible solo para `3Y`, `5Y`, `10Y`
+- en `YTD` o `1Y`, mostrar mensaje de no disponibilidad
+- cálculo anual: `(valor_año_actual / valor_año_previo - 1) * 100`
+
+## 12) Hover con nombre largo
+
+Hover sobre ticker/símbolo en:
+
+- draft
+- grupos/portfolios
+- tabla resumen
+- tooltip del gráfico
+
+Debe mostrar nombre largo del activo.
+
+Si no está cacheado:
+
+- resolver en background
+- actualizar tooltip/título cuando esté disponible
+
+## 13) Estado mínimo
+
+Cliente:
+
+- `activeMode`
+- `modes.pm.collections`
+- `modes.pm.draftItems`
+- `modes.pm.lastCompare`
+- `modes.mpm.collections`
+- `modes.mpm.draftItems`
+- `modes.mpm.lastCompare`
+- `resolveCache`
+- `symbolNames`
+- `marketCache` (solo memoria)
+
+Servidor:
+
+- caché de series históricas por símbolo
+- caché de resolución de símbolos
+
+## 14) Persistencia
+
+Guardar en `localStorage`:
+
+- `groups`
+- `mpmPortfolios`
+- `resolveCache`
+- `symbolNames`
+- `activeMode`
+
+Nunca persistir series históricas grandes en `localStorage`.
+
+## 15) Backend requerido
+
+Stack: Node.js + Express
+
+Endpoints:
+
+1. `GET /api/performance?symbol=...`
+2. `GET /api/performance/batch?symbols=a,b,c`
+3. `GET /api/resolve?query=...`
+
+Fuentes externas:
+
+- Yahoo Finance Chart
+- Yahoo Finance Search
+- OpenFIGI Mapping fallback para WKN/ISIN
+
+## 16) Testing mínimo
+
+Las pruebas automatizadas deben cubrir al menos:
+
+1. comparación mixta PM grupo+ticker
+2. comparación de 1 a 4 selecciones
+3. grupos PM con pesos explícitos
+4. ver componentes PM sin límite artificial
+5. resolución texto libre (`EXXON -> XOM`)
+6. soporte de ticker con sufijo (`EQQQ.L`)
+7. resolución WKN/ISIN
+8. tabla YoY disponible y no disponible según rango
+9. toggle de leyenda
+10. click en grupo/componente rellena comparación
+11. limpiar comparación
+12. portfolios MPM con subsets
+13. expansión de holdings anidados
+14. `buyDate` como inicio efectivo de serie
+15. fallback backend OpenFIGI cuando Yahoo no resuelve un WKN
+
+## 17) Criterios de aceptación
 
 La app cumple si:
-- soporta flujo end-to-end de creación/edición/uso de grupos
-- compara hasta 4 selecciones mixtas
-- muestra componentes ilimitados
-- ofrece tabla resumen + YoY por serie
-- mantiene zoom usable sin pan involuntario
-- muestra nombres largos al hover
-- evita `localStorage quota exceeded`
-- tests en verde
 
-Este documento, por sí solo, debe permitir reconstruir la app completa.
+- PM sigue funcionando sin regresiones visibles
+- MPM permite portfolios y subsets anidados
+- `buyDate` y `sellDate` afectan correctamente la serie
+- WKN/ISIN pueden resolverse aunque Yahoo Search falle, usando fallback OpenFIGI
+- se pueden analizar de 1 a 4 selecciones
+- la UI cambia entre PM y MPM sin mezclar estado
+- tests en verde

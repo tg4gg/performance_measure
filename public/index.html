@@ -12,14 +12,19 @@
   <body>
     <main class="app">
       <header class="hero">
-        <h1>Performance Measure</h1>
-        <p>Pega texto libre, detecta activos, arma grupos ponderados y compara performance.</p>
+        <div class="mode-switch" id="modeSwitch" role="tablist" aria-label="Application modes">
+          <button type="button" data-mode="pm" class="active">Performance measure</button>
+          <button type="button" data-mode="mpm">My performance measure</button>
+        </div>
+        <h1 id="modeTitle">Performance Measure</h1>
+        <p id="modeSubtitle">Pega texto libre, detecta activos, arma grupos ponderados y compara performance.</p>
       </header>
 
       <section class="panel">
-        <h2>1) Texto libre / multilínea</h2>
-        <textarea id="rawInput" rows="6" placeholder="Ejemplo:&#10;Apple&#10;oro&#10;S&amp;P 500&#10;Nasdaq"></textarea>
-        <div class="row">
+        <h2 id="builderTitle">1) Texto libre / multilinea</h2>
+        <p id="builderHint" class="muted section-note"></p>
+        <textarea id="rawInput" rows="6"></textarea>
+        <div class="row wrap">
           <button id="detectBtn" class="primary">Detectar activos</button>
           <span id="detectInfo" class="muted"></span>
         </div>
@@ -27,37 +32,42 @@
       </section>
 
       <section class="panel">
-        <h2>2) Crear grupo compuesto</h2>
-        <div class="row">
-          <input id="groupName" type="text" placeholder="Nombre del grupo (ej. Materias Primas)" />
+        <h2 id="collectionTitle">2) Crear grupo compuesto</h2>
+        <p id="collectionHint" class="muted section-note"></p>
+        <div class="row stack-mobile">
+          <input id="groupName" type="text" />
           <button id="saveGroupBtn">Guardar grupo</button>
+        </div>
+        <div id="subsetBuilder" class="subset-builder hidden">
+          <input id="subsetPortfolioInput" list="portfolioSuggestions" type="text" placeholder="Agregar subset existente" />
+          <button id="addSubsetBtn" type="button">Agregar subset</button>
+          <datalist id="portfolioSuggestions"></datalist>
         </div>
         <div id="groupsContainer" class="groups"></div>
       </section>
 
       <section class="panel">
-        <h2>3) Comparación</h2>
-        <h3>Selector único (máximo 4)</h3>
-        <p class="muted">Cada campo acepta ticker (AAPL, GLD, URA) o nombre exacto de grupo creado.</p>
+        <h2 id="compareTitle">3) Comparacion</h2>
+        <p id="compareHint" class="muted section-note"></p>
         <datalist id="compareSuggestions"></datalist>
         <div class="compare-grid">
-          <input id="compareField1" list="compareSuggestions" placeholder="Campo 1: ticker o grupo" />
-          <input id="compareField2" list="compareSuggestions" placeholder="Campo 2: ticker o grupo" />
-          <input id="compareField3" list="compareSuggestions" placeholder="Campo 3: ticker o grupo (opcional)" />
-          <input id="compareField4" list="compareSuggestions" placeholder="Campo 4: ticker o grupo (opcional)" />
+          <input id="compareField1" list="compareSuggestions" />
+          <input id="compareField2" list="compareSuggestions" />
+          <input id="compareField3" list="compareSuggestions" />
+          <input id="compareField4" list="compareSuggestions" />
         </div>
-        <div class="row">
-          <button id="runCompareBtn" class="primary">Comparar selección</button>
-          <button id="clearCompareBtn">Limpiar selección</button>
+        <div class="row wrap">
+          <button id="runCompareBtn" class="primary">Comparar seleccion</button>
+          <button id="clearCompareBtn">Limpiar seleccion</button>
         </div>
         <div id="compareWarning" class="compare-warning" aria-live="polite"></div>
 
         <div class="range-buttons" id="rangeButtons">
-          <button data-range="ytd" class="active">Year to date</button>
-          <button data-range="1y">One year</button>
-          <button data-range="3y">Three years</button>
-          <button data-range="5y">Five years</button>
-          <button data-range="10y">Ten years</button>
+          <button type="button" data-range="ytd" class="active">Year to date</button>
+          <button type="button" data-range="1y">One year</button>
+          <button type="button" data-range="3y">Three years</button>
+          <button type="button" data-range="5y">Five years</button>
+          <button type="button" data-range="10y">Ten years</button>
         </div>
 
         <div id="chartLegend" class="chart-legend"></div>
@@ -70,10 +80,10 @@
           <table id="perfTable" class="perf-table">
             <thead>
               <tr>
-                <th>Selección</th>
-                <th>YTD</th>
-                <th>1Y</th>
-                <th>3Y</th>
+                <th id="perfHeadLabel">Seleccion</th>
+                <th id="perfHeadYtd">YTD</th>
+                <th id="perfHead1y">1Y</th>
+                <th id="perfHead3y">3Y</th>
               </tr>
             </thead>
             <tbody id="perfTableBody"></tbody>
