@@ -38,6 +38,7 @@ MPM debe permitir:
 - guardar portfolios
 - reutilizar portfolios guardados como `subsets`
 - comparar portfolios, subsets y stocks directos
+- mostrar métricas cacheadas en la sección `2)` para el draft completo, cada subset y cada compra concreta
 
 Cada holding puede tener:
 
@@ -52,6 +53,7 @@ Reglas:
 - `buyDate` define el primer punto desde el cual la posición entra al cálculo.
 - `sellDate` congela el valor de la posición desde esa fecha.
 - si `sellDate < buyDate`, debe rechazarse el draft.
+- las métricas de sección `2)` deben persistirse localmente y recalcularse como máximo una vez por día, salvo refresh manual
 
 ## 3) Resolución de símbolos
 
@@ -146,6 +148,28 @@ Portfolios MPM pueden contener:
 - referencias a otros portfolios (`subsets`)
 
 Debe detectarse referencia circular entre portfolios.
+
+### 6.3 Métricas en sección 2)
+
+La sección `2)` del modo MPM debe mostrar 5 métricas para:
+
+- cada holding directo agregado al draft
+- cada subset agregado al draft
+- el draft completo del portfolio
+
+Métricas:
+
+- `All time %`
+- `Gain USD`
+- `Gain/unit`
+- `Value USD`
+- `Value EUR`
+
+Reglas:
+
+- `Gain/unit` solo tiene sentido cuando la selección representa un único activo subyacente
+- `Value EUR` se calcula desde `Value USD` usando el último valor disponible de `EURUSD=X`
+- debe existir un botón manual `Recalcular metricas`
 
 ## 7) Comparación
 
@@ -297,6 +321,7 @@ Guardar en `localStorage`:
 - `resolveCache`
 - `symbolNames`
 - `activeMode`
+- `mpmMetricsCache`
 
 Nunca persistir series históricas grandes en `localStorage`.
 
@@ -335,6 +360,8 @@ Las pruebas automatizadas deben cubrir al menos:
 13. expansión de holdings anidados
 14. `buyDate` como inicio efectivo de serie
 15. fallback backend OpenFIGI cuando Yahoo no resuelve un WKN
+16. métricas MPM visibles en sección `2)` para holdings, subsets y draft completo
+17. cache local `mpmMetricsCache` y recálculo manual
 
 ## 17) Criterios de aceptación
 

@@ -64,6 +64,10 @@ const resolverAliases = {
 const basePalette = ['#4db5ff', '#6fffb4', '#ffcb6b', '#ff7a90', '#7cc6ff', '#9cffd3'];
 const PROCESSING_MIN_MS =
   typeof window !== 'undefined' && /jsdom/i.test(window.navigator.userAgent) ? 0 : 180;
+const METRICS_REFRESH_DEBOUNCE_MS =
+  typeof window !== 'undefined' && /jsdom/i.test(window.navigator.userAgent) ? 0 : 180;
+const EURUSD_SYMBOL = 'EURUSD=X';
+const METRICS_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
 
 const modeConfigs = {
   pm: {
@@ -155,7 +159,13 @@ function createModeState(mode) {
     editingIndex: null,
     rawInput: '',
     draftName: '',
-    compareDraft: ['', '', '', '']
+    compareDraft: ['', '', '', ''],
+    sectionMetrics: {
+      full: null,
+      items: {},
+      status: '',
+      refreshedAt: 0
+    }
   };
 }
 
@@ -168,6 +178,7 @@ const state = {
   marketCache: {},
   resolveCache: loadLocal('resolveCache', {}),
   symbolNames: loadLocal('symbolNames', {}),
+  mpmMetricsCache: loadLocal('mpmMetricsCache', {}),
   chart: null
 };
 
@@ -189,6 +200,10 @@ const subsetBuilder = document.getElementById('subsetBuilder');
 const subsetPortfolioInput = document.getElementById('subsetPortfolioInput');
 const addSubsetBtn = document.getElementById('addSubsetBtn');
 const portfolioSuggestions = document.getElementById('portfolioSuggestions');
+const draftMetricsSection = document.getElementById('draftMetricsSection');
+const refreshDraftMetricsBtn = document.getElementById('refreshDraftMetricsBtn');
+const draftMetricsStatus = document.getElementById('draftMetricsStatus');
+const draftMetricsCard = document.getElementById('draftMetricsCard');
 const compareTitle = document.getElementById('compareTitle');
 const compareHint = document.getElementById('compareHint');
 const runCompareBtn = document.getElementById('runCompareBtn');
@@ -204,6 +219,11 @@ const perfHeadLabel = document.getElementById('perfHeadLabel');
 const perfHeadYtd = document.getElementById('perfHeadYtd');
 const perfHead1y = document.getElementById('perfHead1y');
 const perfHead3y = document.getElementById('perfHead3y');
+const perfHeadAllTime = document.getElementById('perfHeadAllTime');
+const perfHeadGainUsd = document.getElementById('perfHeadGainUsd');
+const perfHeadGainPerUnit = document.getElementById('perfHeadGainPerUnit');
+const perfHeadValueUsd = document.getElementById('perfHeadValueUsd');
+const perfHeadValueEur = document.getElementById('perfHeadValueEur');
 const perfTableBody = document.getElementById('perfTableBody');
 const yoyTitle = document.getElementById('yoyTitle');
 const yoyTableBody = document.getElementById('yoyTableBody');
@@ -211,6 +231,7 @@ const chartLegend = document.getElementById('chartLegend');
 const compareWarning = document.getElementById('compareWarning');
 const rangeButtons = document.getElementById('rangeButtons');
 const pendingSymbolNameRequests = new Map();
+let pendingMpmMetricsRefresh = null;
 
 function getActiveModeState() {
   return state.modes[state.activeMode];
@@ -226,6 +247,10 @@ function getModeConfig(mode = state.activeMode) {
 
 function persistModeCollections(mode) {
   saveLocal(modeConfigs[mode].storageKey, getModeState(mode).collections);
+}
+
+function saveMpmMetricsCache() {
+  saveLocal('mpmMetricsCache', state.mpmMetricsCache);
 }
 
 function sleep(ms) {
@@ -608,13 +633,117 @@ function escapeHtml(text) {
     .replace(/'/g, '&#39;');
 }
 
+function cloneMetricPayload(payload) {
+  return payload ? JSON.parse(JSON.stringify(payload)) : null;
+}
+
+function createMetricCacheKey(entry) {
+  const holdings = (entry?.holdings || []).map((holding) => ({
+    symbol: holding.symbol,
+    purchasePrice: holding.purchasePrice ?? null,
+    units: holding.units ?? null,
+    buyDate: holding.buyDate || '',
+    sellDate: holding.sellDate || ''
+  }));
+  return JSON.stringify(holdings);
+}
+
+function getCachedMetricPayload(cacheKey) {
+  const cached = state.mpmMetricsCache[cacheKey];
+  if (!cached) return null;
+  if (Date.now() - Number(cached.ts || 0) > METRICS_CACHE_TTL_MS) return null;
+  return cloneMetricPayload(cached.payload);
+}
+
+function storeCachedMetricPayload(cacheKey, payload) {
+  state.mpmMetricsCache[cacheKey] = {
+    ts: Date.now(),
+    payload
+  };
+  saveMpmMetricsCache();
+}
+
+function renderMetricGrid(metrics) {
+  if (!metrics) {
+    return '<div class="metrics-note">Sin datos calculados.</div>';
+  }
+  if (metrics.loading) {
+    return '<div class="metrics-note">Calculando metricas...</div>';
+  }
+  if (metrics.error) {
+    return `<div class="metrics-note">${escapeHtml(metrics.error)}</div>`;
+  }
+
+  return `
+    <div class="metrics-grid">
+      <div class="metric-chip"><strong>All time %</strong><span>${formatPct(metrics.allTimePct)}</span></div>
+      <div class="metric-chip"><strong>Gain USD</strong><span>${formatUsd(metrics.totalGainUsd)}</span></div>
+      <div class="metric-chip"><strong>Gain/unit</strong><span>${formatUsd(metrics.gainPerUnit)}</span></div>
+      <div class="metric-chip"><strong>Value USD</strong><span>${formatUsd(metrics.currentValueUsd)}</span></div>
+      <div class="metric-chip"><strong>Value EUR</strong><span>${formatEur(metrics.currentValueEur)}</span></div>
+    </div>
+  `;
+}
+
+function getItemMetricTarget(item, collections) {
+  if (!item) return null;
+
+  if (item.type === 'portfolio') {
+    const collection = findCollectionByName('mpm', item.refName, collections);
+    if (!collection) {
+      return {
+        entry: null,
+        error: `Subset "${item.refName}" no encontrado.`
+      };
+    }
+
+    return {
+      entry: {
+        label: item.refName,
+        holdings: expandMpmCollection(collection, collections, new Set([collection.name.toLowerCase()]), [])
+      },
+      error: null
+    };
+  }
+
+  return {
+    entry: {
+      label: item.symbol,
+      holdings: [{ ...item, sourcePath: [] }]
+    },
+    error: null
+  };
+}
+
+function getDraftMetricTarget(draftItems, collections) {
+  try {
+    const normalizedItems = normalizeMpmDraftItems(draftItems);
+    return {
+      entry: {
+        label: 'Draft MPM',
+        holdings: expandMpmCollection({ name: '__draft__', items: normalizedItems }, collections, new Set(), [])
+      },
+      error: null
+    };
+  } catch (err) {
+    return {
+      entry: null,
+      error: err?.message || 'No se pudo calcular el draft.'
+    };
+  }
+}
+
 function renderAssetsDraft() {
   const mode = state.activeMode;
   const modeState = getActiveModeState();
   assetsContainer.innerHTML = '';
 
   modeState.draftItems.forEach((item, index) => {
+    const card = document.createElement('div');
+    card.className = mode === 'mpm' ? 'asset-card' : '';
     const row = document.createElement('div');
+    const metricKey = `item-${index}`;
+    const metricState = mode === 'mpm' ? modeState.sectionMetrics.items[metricKey] || null : null;
 
     if (mode === 'pm') {
       row.className = 'asset-row pm-row';
@@ -641,6 +770,7 @@ function renderAssetsDraft() {
       row.querySelector('button').addEventListener('click', () => {
         modeState.draftItems.splice(index, 1);
         renderAssetsDraft();
+        scheduleMpmSectionMetricsRefresh();
       });
     } else {
       row.className = 'asset-row mpm-row';
@@ -664,22 +794,135 @@ function renderAssetsDraft() {
           if (!target || !key) return;
           if (key === 'sellDate' || key === 'buyDate') {
             target[key] = sanitizeDate(e.target.value);
+            scheduleMpmSectionMetricsRefresh();
             return;
           }
           target[key] = parseMaybeNumber(e.target.value);
+          scheduleMpmSectionMetricsRefresh();
         });
       });
 
       row.querySelector('button').addEventListener('click', () => {
         modeState.draftItems.splice(index, 1);
         renderAssetsDraft();
+        scheduleMpmSectionMetricsRefresh();
       });
     }
 
-    assetsContainer.appendChild(row);
+    if (mode === 'mpm') {
+      card.appendChild(row);
+      const metricBlock = document.createElement('div');
+      metricBlock.innerHTML = renderMetricGrid(metricState);
+      card.appendChild(metricBlock);
+      assetsContainer.appendChild(card);
+    } else {
+      assetsContainer.appendChild(row);
+    }
   });
 
+  renderDraftMetricsPanel();
   void enrichTickerHover(assetsContainer);
+}
+
+function renderDraftMetricsPanel() {
+  if (!draftMetricsSection || !draftMetricsCard || !draftMetricsStatus) return;
+
+  const isMpm = state.activeMode === 'mpm';
+  draftMetricsSection.classList.toggle('hidden', !isMpm);
+  if (!isMpm) return;
+
+  const modeState = getModeState('mpm');
+  draftMetricsCard.innerHTML = renderMetricGrid(modeState.sectionMetrics.full);
+  draftMetricsStatus.textContent = modeState.sectionMetrics.status || '';
+}
+
+async function refreshMpmSectionMetrics(force = false) {
+  if (state.activeMode !== 'mpm') return;
+
+  const modeState = getModeState('mpm');
+  const collections = modeState.collections;
+  const nextSectionMetrics = {
+    full: null,
+    items: {},
+    status: modeState.sectionMetrics.status,
+    refreshedAt: modeState.sectionMetrics.refreshedAt
+  };
+
+  const targets = [];
+  modeState.draftItems.forEach((item, index) => {
+    const target = getItemMetricTarget(item, collections);
+    const id = `item-${index}`;
+    if (!target?.entry) {
+      nextSectionMetrics.items[id] = target?.error ? { error: target.error } : null;
+      return;
+    }
+
+    const cacheKey = createMetricCacheKey(target.entry);
+    const cached = !force ? getCachedMetricPayload(cacheKey) : null;
+    if (cached) {
+      nextSectionMetrics.items[id] = cached;
+      return;
+    }
+
+    nextSectionMetrics.items[id] = { loading: true };
+    targets.push({ id, kind: 'item', cacheKey, entry: target.entry });
+  });
+
+  const fullTarget = getDraftMetricTarget(modeState.draftItems, collections);
+  if (fullTarget?.entry) {
+    const fullCacheKey = createMetricCacheKey(fullTarget.entry);
+    const cached = !force ? getCachedMetricPayload(fullCacheKey) : null;
+    if (cached) {
+      nextSectionMetrics.full = cached;
+    } else {
+      nextSectionMetrics.full = { loading: true };
+      targets.push({ id: 'full', kind: 'full', cacheKey: fullCacheKey, entry: fullTarget.entry });
+    }
+  } else {
+    nextSectionMetrics.full = fullTarget?.error ? { error: fullTarget.error } : null;
+  }
+
+  modeState.sectionMetrics = nextSectionMetrics;
+  renderDraftMetricsPanel();
+  renderAssetsDraft();
+
+  if (targets.length === 0) {
+    modeState.sectionMetrics.status = modeState.draftItems.length > 0 ? 'Metricas al dia.' : '';
+    renderDraftMetricsPanel();
+    return;
+  }
+
+  const symbols = [
+    ...new Set(targets.flatMap((target) => (target.entry.holdings || []).map((holding) => holding.symbol)))
+  ];
+  symbols.push(EURUSD_SYMBOL);
+  const { symbolsData } = await loadSymbolsDataSafe([...new Set(symbols)]);
+
+  targets.forEach((target) => {
+    const metrics = computeEntrySnapshot(target.entry, symbolsData, 'mpm');
+    storeCachedMetricPayload(target.cacheKey, metrics);
+    if (target.kind === 'full') {
+      modeState.sectionMetrics.full = metrics;
+    } else {
+      modeState.sectionMetrics.items[target.id] = metrics;
+    }
+  });
+
+  modeState.sectionMetrics.status = `Actualizado ${new Date().toLocaleString()}`;
+  modeState.sectionMetrics.refreshedAt = Date.now();
+  renderDraftMetricsPanel();
+  renderAssetsDraft();
+}
+
+function scheduleMpmSectionMetricsRefresh(force = false) {
+  if (state.activeMode !== 'mpm') return;
+  if (pendingMpmMetricsRefresh) {
+    clearTimeout(pendingMpmMetricsRefresh);
+  }
+  pendingMpmMetricsRefresh = setTimeout(() => {
+    pendingMpmMetricsRefresh = null;
+    void refreshMpmSectionMetrics(force);
+  }, force ? 0 : METRICS_REFRESH_DEBOUNCE_MS);
 }
 
 function stringifyPmCollectionLines(collection) {
@@ -729,6 +972,7 @@ function setDraftFromCollection(collection) {
   groupName.value = modeState.draftName;
   renderAssetsDraft();
   detectInfo.textContent = `${modeState.draftItems.length} item(s) cargado(s) para edicion.`;
+  scheduleMpmSectionMetricsRefresh();
 }
 
 function resetCollectionEditor() {
@@ -756,6 +1000,7 @@ function deleteCollection(index) {
   }
 
   renderCollections();
+  scheduleMpmSectionMetricsRefresh();
 }
 
 function editCollection(index) {
@@ -883,6 +1128,7 @@ function fillNextComparisonField(value) {
 
 function trimToRange(points, range) {
   if (points.length === 0) return [];
+  if (range === 'all') return points;
 
   const lastDate = new Date(points[points.length - 1].date + 'T00:00:00Z');
   const start = new Date(lastDate);
@@ -1242,6 +1488,25 @@ function formatPct(value) {
   return `${sign}${value.toFixed(2)}%`;
 }
 
+function formatCurrency(value, currency) {
+  if (value == null || Number.isNaN(value)) return '-';
+  const formatted = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(Math.abs(value));
+  return value < 0 ? `-${formatted}` : formatted;
+}
+
+function formatUsd(value) {
+  return formatCurrency(value, 'USD');
+}
+
+function formatEur(value) {
+  return formatCurrency(value, 'EUR');
+}
+
 function renderYoYMessage(title, message) {
   if (!yoyTableBody || !yoyTitle) return;
   yoyTitle.textContent = title || 'YoY';
@@ -1447,6 +1712,78 @@ function computeEntryReturn(entry, symbolsData, range, mode = state.activeMode) 
   return mode === 'pm' ? last - 100 : ((last / first) - 1) * 100;
 }
 
+function computeHoldingSnapshot(holding, symbolsData) {
+  const points = symbolsData[holding.symbol] || [];
+  if (!points.length) return null;
+
+  const entryPoint = getHoldingEntryPoint(points, holding);
+  if (!entryPoint?.close) return null;
+
+  const basePerUnit =
+    holding.purchasePrice != null && holding.purchasePrice > 0 ? holding.purchasePrice : entryPoint.close;
+  const units = holding.units != null && holding.units > 0 ? holding.units : 1;
+  const sellDate = sanitizeDate(holding.sellDate);
+  const soldPoint = sellDate ? [...points].reverse().find((point) => point.date <= sellDate) : null;
+  const currentPoint = soldPoint || points[points.length - 1];
+  if (!currentPoint?.close) return null;
+
+  const currentPerUnit = Number(currentPoint.close);
+  return {
+    symbol: holding.symbol,
+    units,
+    baseCost: basePerUnit * units,
+    currentValue: currentPerUnit * units,
+    gainUsd: (currentPerUnit - basePerUnit) * units,
+    gainPerUnit: currentPerUnit - basePerUnit
+  };
+}
+
+function computeEntrySnapshot(entry, symbolsData, mode = state.activeMode) {
+  if (mode === 'pm') {
+    return {
+      allTimePct: computeEntryReturn(entry, symbolsData, 'all', mode),
+      totalGainUsd: null,
+      gainPerUnit: null,
+      currentValueUsd: null,
+      currentValueEur: null
+    };
+  }
+
+  const snapshots = (entry.holdings || [])
+    .map((holding) => computeHoldingSnapshot(holding, symbolsData))
+    .filter(Boolean);
+
+  if (!snapshots.length) {
+    return {
+      allTimePct: null,
+      totalGainUsd: null,
+      gainPerUnit: null,
+      currentValueUsd: null,
+      currentValueEur: null
+    };
+  }
+
+  const totalBaseCost = snapshots.reduce((sum, snapshot) => sum + snapshot.baseCost, 0);
+  const totalGainUsd = snapshots.reduce((sum, snapshot) => sum + snapshot.gainUsd, 0);
+  const currentValueUsd = snapshots.reduce((sum, snapshot) => sum + snapshot.currentValue, 0);
+  const totalUnits = snapshots.reduce((sum, snapshot) => sum + snapshot.units, 0);
+  const uniqueSymbols = [...new Set(snapshots.map((snapshot) => snapshot.symbol))];
+  const eurUsdRate = symbolsData[EURUSD_SYMBOL]?.at(-1)?.close ?? null;
+  let gainPerUnit = null;
+
+  if (uniqueSymbols.length === 1 && totalUnits > 0) {
+    gainPerUnit = totalGainUsd / totalUnits;
+  }
+
+  return {
+    allTimePct: totalBaseCost > 0 ? (totalGainUsd / totalBaseCost) * 100 : null,
+    totalGainUsd,
+    gainPerUnit,
+    currentValueUsd,
+    currentValueEur: eurUsdRate ? currentValueUsd / eurUsdRate : null
+  };
+}
+
 function renderPerformanceTable(entries, symbolsData, mode = state.activeMode) {
   if (!perfTableBody) return;
   const rows = entries.map((entry) => ({
@@ -1458,7 +1795,8 @@ function renderPerformanceTable(entries, symbolsData, mode = state.activeMode) {
         : null,
     ytd: computeEntryReturn(entry, symbolsData, 'ytd', mode),
     oneYear: computeEntryReturn(entry, symbolsData, '1y', mode),
-    threeYears: computeEntryReturn(entry, symbolsData, '3y', mode)
+    threeYears: computeEntryReturn(entry, symbolsData, '3y', mode),
+    ...computeEntrySnapshot(entry, symbolsData, mode)
   }));
 
   perfTableBody.innerHTML = rows
@@ -1471,6 +1809,11 @@ function renderPerformanceTable(entries, symbolsData, mode = state.activeMode) {
         <td>${formatPct(row.ytd)}</td>
         <td>${formatPct(row.oneYear)}</td>
         <td>${formatPct(row.threeYears)}</td>
+        <td>${formatPct(row.allTimePct)}</td>
+        <td>${formatUsd(row.totalGainUsd)}</td>
+        <td>${formatUsd(row.gainPerUnit)}</td>
+        <td>${formatUsd(row.currentValueUsd)}</td>
+        <td>${formatEur(row.currentValueEur)}</td>
       </tr>
     `
     )
@@ -1510,6 +1853,9 @@ async function compareMixed(mode = state.activeMode) {
       )
     )
   ];
+  if (mode === 'mpm') {
+    symbols.push(EURUSD_SYMBOL);
+  }
   const { symbolsData, failed } = await loadSymbolsDataSafe(symbols);
 
   const directSymbols = entries.filter((entry) => entry.type === 'symbol').map((entry) => entry.label);
@@ -1586,6 +1932,9 @@ async function compareCollectionComponents(index, mode = state.activeMode) {
       )
     )
   ];
+  if (mode === 'mpm') {
+    symbols.push(EURUSD_SYMBOL);
+  }
 
   const { symbolsData, failed } = await loadSymbolsDataSafe(symbols);
   await Promise.all(symbols.map((symbol) => ensureSymbolName(symbol)));
@@ -1732,10 +2081,16 @@ function renderModeUi() {
   runCompareBtn.textContent = config.compareButtonLabel;
   clearCompareBtn.textContent = config.clearButtonLabel;
   subsetBuilder.classList.toggle('hidden', mode !== 'mpm');
+  draftMetricsSection?.classList.toggle('hidden', mode !== 'mpm');
   perfHeadLabel.textContent = 'Seleccion';
   perfHeadYtd.textContent = 'YTD';
   perfHead1y.textContent = '1Y';
   perfHead3y.textContent = '3Y';
+  if (perfHeadAllTime) perfHeadAllTime.textContent = 'All time %';
+  if (perfHeadGainUsd) perfHeadGainUsd.textContent = 'Gain USD';
+  if (perfHeadGainPerUnit) perfHeadGainPerUnit.textContent = 'Gain/unit';
+  if (perfHeadValueUsd) perfHeadValueUsd.textContent = 'Value USD';
+  if (perfHeadValueEur) perfHeadValueEur.textContent = 'Value EUR';
 
   compareFields.forEach((field, index) => {
     const suffix = index === 0 ? '1' : String(index + 1);
@@ -1752,6 +2107,9 @@ function renderModeUi() {
   detectInfo.textContent = '';
   renderAssetsDraft();
   renderCollections();
+  if (mode === 'mpm') {
+    scheduleMpmSectionMetricsRefresh();
+  }
 }
 
 detectBtn.addEventListener('click', async () => {
@@ -1775,6 +2133,7 @@ detectBtn.addEventListener('click', async () => {
         unresolved.length > 3 ? '...' : ''
       }.`;
     }
+    scheduleMpmSectionMetricsRefresh();
   });
 });
 
@@ -1814,6 +2173,7 @@ saveGroupBtn.addEventListener('click', async () => {
       persistModeCollections(mode);
       renderCollections();
       resetCollectionEditor();
+      scheduleMpmSectionMetricsRefresh();
     } catch (err) {
       alert(err.message || 'No se pudo guardar.');
     }
@@ -1838,6 +2198,14 @@ addSubsetBtn?.addEventListener('click', async () => {
     getActiveModeState().draftItems.push({ type: 'portfolio', refName: ref.name });
     subsetPortfolioInput.value = '';
     renderAssetsDraft();
+    scheduleMpmSectionMetricsRefresh();
+  });
+});
+
+refreshDraftMetricsBtn?.addEventListener('click', async () => {
+  await withButtonProcessing(refreshDraftMetricsBtn, async () => {
+    if (state.activeMode !== 'mpm') return;
+    await refreshMpmSectionMetrics(true);
   });
 });
 

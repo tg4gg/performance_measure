@@ -43,6 +43,14 @@
           <button id="addSubsetBtn" type="button">Agregar subset</button>
           <datalist id="portfolioSuggestions"></datalist>
         </div>
+        <div id="draftMetricsSection" class="draft-metrics hidden">
+          <div class="row wrap">
+            <strong>Resumen del draft MPM</strong>
+            <button id="refreshDraftMetricsBtn" type="button">Recalcular metricas</button>
+            <span id="draftMetricsStatus" class="muted"></span>
+          </div>
+          <div id="draftMetricsCard" class="draft-metrics-card"></div>
+        </div>
         <div id="groupsContainer" class="groups"></div>
       </section>
 
@@ -84,6 +92,11 @@
                 <th id="perfHeadYtd">YTD</th>
                 <th id="perfHead1y">1Y</th>
                 <th id="perfHead3y">3Y</th>
+                <th id="perfHeadAllTime">All time %</th>
+                <th id="perfHeadGainUsd">Gain USD</th>
+                <th id="perfHeadGainPerUnit">Gain/unit</th>
+                <th id="perfHeadValueUsd">Value USD</th>
+                <th id="perfHeadValueEur">Value EUR</th>
               </tr>
             </thead>
             <tbody id="perfTableBody"></tbody>

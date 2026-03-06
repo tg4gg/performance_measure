@@ -25,7 +25,8 @@ const mockSeries = {
   MSFT: makeYearlyPoints(2021, [100, 109, 121, 132, 145, 156]),
   EQQQ: makeYearlyPoints(2021, [100, 104, 112, 125, 136, 148]),
   'EQQQ.L': makeYearlyPoints(2021, [100, 104, 112, 125, 136, 148]),
-  TSLA: makeYearlyPoints(2021, [100, 128, 119, 137, 142, 160])
+  TSLA: makeYearlyPoints(2021, [100, 128, 119, 137, 142, 160]),
+  'EURUSD=X': makeYearlyPoints(2021, [1.08, 1.09, 1.07, 1.1, 1.11, 1.2])
 };
 
 function buildHtml() {
@@ -50,6 +51,10 @@ function buildHtml() {
     <input id="subsetPortfolioInput" />
     <button id="addSubsetBtn"></button>
     <datalist id="portfolioSuggestions"></datalist>
+    <div id="draftMetricsSection" class="hidden"></div>
+    <button id="refreshDraftMetricsBtn"></button>
+    <span id="draftMetricsStatus"></span>
+    <div id="draftMetricsCard"></div>
     <div id="groupsContainer"></div>
     <h2 id="compareTitle"></h2>
     <p id="compareHint"></p>
@@ -62,7 +67,7 @@ function buildHtml() {
     <input id="compareField4" />
     <datalist id="compareSuggestions"></datalist>
     <table>
-      <thead><tr><th id="perfHeadLabel"></th><th id="perfHeadYtd"></th><th id="perfHead1y"></th><th id="perfHead3y"></th></tr></thead>
+      <thead><tr><th id="perfHeadLabel"></th><th id="perfHeadYtd"></th><th id="perfHead1y"></th><th id="perfHead3y"></th><th id="perfHeadAllTime"></th><th id="perfHeadGainUsd"></th><th id="perfHeadGainPerUnit"></th><th id="perfHeadValueUsd"></th><th id="perfHeadValueEur"></th></tr></thead>
       <tbody id="perfTableBody"></tbody>
     </table>
     <table>
@@ -537,6 +542,44 @@ describe('chart rendering flows', () => {
     expect(document.getElementById('groupsContainer').textContent).toContain('Subset');
   });
 
+  it('shows cached section-2 metrics for the full draft, subsets, and direct purchases in MPM', async () => {
+    document.querySelector('[data-mode="mpm"]').click();
+    await tick();
+
+    const rawInput = document.getElementById('rawInput');
+    const detectBtn = document.getElementById('detectBtn');
+    const groupName = document.getElementById('groupName');
+    const saveGroupBtn = document.getElementById('saveGroupBtn');
+    const addSubsetBtn = document.getElementById('addSubsetBtn');
+    const subsetInput = document.getElementById('subsetPortfolioInput');
+
+    rawInput.value = 'AAPL, price=95, units=2';
+    rawInput.dispatchEvent(new window.Event('input'));
+    detectBtn.click();
+    await tick();
+    groupName.value = 'Core';
+    groupName.dispatchEvent(new window.Event('input'));
+    saveGroupBtn.click();
+    await tick();
+
+    rawInput.value = 'GLD, price=101, units=2';
+    rawInput.dispatchEvent(new window.Event('input'));
+    detectBtn.click();
+    await tick();
+    subsetInput.value = 'Core';
+    addSubsetBtn.click();
+    await tick();
+
+    expect(document.getElementById('draftMetricsSection').classList.contains('hidden')).toBe(false);
+    expect(document.getElementById('draftMetricsCard').textContent).toContain('Value USD');
+    expect(document.getElementById('assetsContainer').textContent).toContain('Gain USD');
+    expect(document.getElementById('assetsContainer').textContent).toContain('Value EUR');
+
+    const metricsCache = JSON.parse(localStorage.getItem('mpmMetricsCache'));
+    expect(metricsCache).toBeTruthy();
+    expect(Object.keys(metricsCache).length).toBeGreaterThan(0);
+  });
+
   it('expands nested MPM holdings when viewing portfolio holdings', async () => {
     document.querySelector('[data-mode="mpm"]').click();
     await tick();
@@ -609,5 +652,12 @@ describe('chart rendering flows', () => {
     expect(global.__chartInstance).toBeTruthy();
     expect(global.__chartInstance.data.labels[0]).toBe('2024-01-02');
     expect(global.__chartInstance.data.datasets[0].label).toContain('buy 2024-01-02');
+
+    const cells = [...document.querySelectorAll('#perfTableBody tr:first-child td')].map((cell) => cell.textContent.trim());
+    expect(cells[4]).toBe('+76.84%');
+    expect(cells[5]).toBe('$146.00');
+    expect(cells[6]).toBe('$73.00');
+    expect(cells[7]).toBe('$336.00');
+    expect(cells[8]).toBe('€280.00');
   });
 });

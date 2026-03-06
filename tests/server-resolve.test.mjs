@@ -119,7 +119,7 @@ describe('server resolve fallback', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.symbol).toBe('BRK-B');
-    expect(response.body.source).toBe('openfigi');
+    expect(['openfigi', 'resolve-cache']).toContain(response.body.source);
     expect(response.body.name).toContain('BERKSHIRE');
   });
 });

@@ -50,6 +50,20 @@ Web app para analizar performance de activos financieros en dos modos paralelos:
 - `buyDate` define cuándo entra una posición al cálculo.
 - `sellDate` congela la posición desde la fecha de venta.
 - Los portfolios ponderan por costo base (`purchasePrice * units`, o fallback al primer precio disponible si falta).
+- En la sección `2)` se muestran 5 métricas para:
+  - cada compra concreta en el draft
+  - cada subset agregado
+  - el draft completo del portfolio
+- Métricas mostradas:
+  - `All time %`
+  - `Gain USD`
+  - `Gain/unit`
+  - `Value USD`
+  - `Value EUR`
+- Las métricas MPM se guardan en `localStorage` y:
+  - se reutilizan por hasta 1 día
+  - se recalculan automáticamente si están vencidas o cambia el draft
+  - se pueden recalcular manualmente con `Recalcular metricas`
 
 ## Ejemplos de entrada MPM
 
@@ -121,7 +135,7 @@ Servidor:
 - Resolución texto->ticker: `.cache/resolve-cache.json` (TTL 30 días)
 
 Cliente:
-- `groups`, `mpmPortfolios`, `resolveCache`, `symbolNames`, `activeMode` en `localStorage`
+- `groups`, `mpmPortfolios`, `resolveCache`, `symbolNames`, `activeMode`, `mpmMetricsCache` en `localStorage`
 - `marketCache` solo en memoria
 
 ## Release
