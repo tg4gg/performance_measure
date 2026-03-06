@@ -18,7 +18,7 @@
 
       <section class="panel">
         <h2>1) Texto libre / multilínea</h2>
-        <textarea id="rawInput" rows="6" placeholder="Ejemplo:\nApple\noro\nS&P 500\nNasdaq"></textarea>
+        <textarea id="rawInput" rows="6" placeholder="Ejemplo:&#10;Apple&#10;oro&#10;S&amp;P 500&#10;Nasdaq"></textarea>
         <div class="row">
           <button id="detectBtn" class="primary">Detectar activos</button>
           <span id="detectInfo" class="muted"></span>
@@ -50,6 +50,7 @@
           <button id="runCompareBtn" class="primary">Comparar selección</button>
           <button id="clearCompareBtn">Limpiar selección</button>
         </div>
+        <div id="compareWarning" class="compare-warning" aria-live="polite"></div>
 
         <div class="range-buttons" id="rangeButtons">
           <button data-range="ytd" class="active">Year to date</button>

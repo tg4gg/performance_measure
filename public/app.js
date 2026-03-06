@@ -20,11 +20,55 @@ const resolverAliases = {
   GOLD: 'GC=F',
   PLATA: 'SI=F',
   SILVER: 'SI=F',
+  BTC: 'BTC-USD',
   BITCOIN: 'BTC-USD',
-  ETHEREUM: 'ETH-USD'
+  ETH: 'ETH-USD',
+  ETHER: 'ETH-USD',
+  ETHEREUM: 'ETH-USD',
+  BNB: 'BNB-USD',
+  'BINANCE COIN': 'BNB-USD',
+  SOL: 'SOL-USD',
+  SOLANA: 'SOL-USD',
+  XRP: 'XRP-USD',
+  RIPPLE: 'XRP-USD',
+  ADA: 'ADA-USD',
+  CARDANO: 'ADA-USD',
+  DOGE: 'DOGE-USD',
+  DOGECOIN: 'DOGE-USD',
+  TRX: 'TRX-USD',
+  TRON: 'TRX-USD',
+  AVAX: 'AVAX-USD',
+  AVALANCHE: 'AVAX-USD',
+  SHIB: 'SHIB-USD',
+  'SHIBA INU': 'SHIB-USD',
+  LINK: 'LINK-USD',
+  CHAINLINK: 'LINK-USD',
+  DOT: 'DOT-USD',
+  POLKADOT: 'DOT-USD',
+  BCH: 'BCH-USD',
+  'BITCOIN CASH': 'BCH-USD',
+  LTC: 'LTC-USD',
+  LITECOIN: 'LTC-USD',
+  XLM: 'XLM-USD',
+  STELLAR: 'XLM-USD',
+  HBAR: 'HBAR-USD',
+  HEDERA: 'HBAR-USD',
+  UNI: 'UNI-USD',
+  UNISWAP: 'UNI-USD',
+  ATOM: 'ATOM-USD',
+  COSMOS: 'ATOM-USD',
+  NEAR: 'NEAR-USD',
+  ETC: 'ETC-USD'
 };
 
-const palette = ['#4db5ff', '#6fffb4', '#ffcb6b', '#ff7a90'];
+const basePalette = ['#4db5ff', '#6fffb4', '#ffcb6b', '#ff7a90', '#7cc6ff', '#9cffd3'];
+
+function colorForSeries(index) {
+  if (index < basePalette.length) return basePalette[index];
+  // Golden-angle hue distribution gives visually distinct colors for many series.
+  const hue = Math.round((index * 137.508) % 360);
+  return `hsl(${hue} 78% 62%)`;
+}
 
 const state = {
   assetsDraft: [],
@@ -58,6 +102,7 @@ const perfTableBody = document.getElementById('perfTableBody');
 const yoyTitle = document.getElementById('yoyTitle');
 const yoyTableBody = document.getElementById('yoyTableBody');
 const chartLegend = document.getElementById('chartLegend');
+const compareWarning = document.getElementById('compareWarning');
 const rangeButtons = document.getElementById('rangeButtons');
 const pendingSymbolNameRequests = new Map();
 const PROCESSING_MIN_MS =
@@ -116,7 +161,11 @@ function normalizeLine(line) {
   if (resolverAliases[cleaned]) return resolverAliases[cleaned];
   if (cleaned.includes(' ')) return '';
 
-  const maybeTicker = cleaned.match(/\^?[A-Z]{1,5}(?:-[A-Z]{1,4}|=[A-Z])?/);
+  // If user already entered an explicit exchange-qualified symbol, keep it as-is.
+  if (/^\^?[A-Z]{1,6}\.[A-Z]{1,5}$/.test(cleaned)) return cleaned;
+  if (/^\^?[A-Z]{1,6}(?:-[A-Z]{1,5}|=[A-Z])$/.test(cleaned)) return cleaned;
+
+  const maybeTicker = cleaned.match(/\^?[A-Z]{1,5}(?:\.[A-Z]{1,4}|-[A-Z]{1,4}|=[A-Z])?/);
   return maybeTicker ? maybeTicker[0] : '';
 }
 
@@ -582,8 +631,8 @@ function alignSeriesCollection(seriesEntries) {
     return {
       label: entry.label,
       data,
-      borderColor: entry.color || palette[idx % palette.length],
-      backgroundColor: entry.color || palette[idx % palette.length],
+      borderColor: entry.color || colorForSeries(idx),
+      backgroundColor: entry.color || colorForSeries(idx),
       borderWidth: 2,
       pointRadius: 0,
       spanGaps: true
@@ -594,7 +643,7 @@ function alignSeriesCollection(seriesEntries) {
 }
 
 function isTickerLabel(label) {
-  return /^\^?[A-Z]{1,5}(?:-[A-Z]{1,4}|=[A-Z])?$/.test(String(label || '').trim());
+  return /^\^?[A-Z]{1,5}(?:\.[A-Z]{1,4}|-[A-Z]{1,4}|=[A-Z])?$/.test(String(label || '').trim());
 }
 
 const htmlLegendPlugin = {
@@ -750,6 +799,11 @@ function renderYoYMessage(title, message) {
   yoyTableBody.innerHTML = `<tr><td colspan="2">${message}</td></tr>`;
 }
 
+function setCompareWarning(message) {
+  if (!compareWarning) return;
+  compareWarning.textContent = message || '';
+}
+
 function buildYoYRows(labels, data) {
   const byYear = new Map();
   for (let i = 0; i < labels.length; i += 1) {
@@ -861,13 +915,36 @@ async function resolveComparisonEntry(value) {
   };
 }
 
+async function resolveComparisonEntrySafe(value) {
+  try {
+    const entry = await resolveComparisonEntry(value);
+    return { entry, error: null };
+  } catch (err) {
+    return { entry: null, error: err?.message || 'No se pudo resolver la selección' };
+  }
+}
+
+async function loadSymbolsDataSafe(symbols) {
+  const symbolsData = {};
+  const failed = [];
+  for (const symbol of symbols) {
+    try {
+      symbolsData[symbol] = await getSymbolSeries(symbol);
+    } catch (err) {
+      failed.push({ symbol, error: err?.message || 'Sin datos' });
+    }
+  }
+  return { symbolsData, failed };
+}
+
 async function compareMixed() {
   const rawValues = compareFields.map((field) => field.value.trim());
-  const resolvedEntries = await Promise.all(rawValues.map((value) => resolveComparisonEntry(value)));
-  const portfolios = resolvedEntries.filter(Boolean);
+  const resolvedEntries = await Promise.all(rawValues.map((value) => resolveComparisonEntrySafe(value)));
+  const resolveErrors = resolvedEntries.filter((x) => x.error).map((x) => x.error);
+  const portfolios = resolvedEntries.map((x) => x.entry).filter(Boolean);
 
-  if (portfolios.length < 2) {
-    alert('Ingresa al menos 2 elementos para comparar.');
+  if (portfolios.length < 1) {
+    alert('No se pudo resolver ninguna selección válida.');
     return;
   }
 
@@ -877,11 +954,7 @@ async function compareMixed() {
   }
 
   const symbols = [...new Set(portfolios.flatMap((p) => p.assets.map((a) => a.symbol)))];
-  const symbolsData = {};
-
-  for (const symbol of symbols) {
-    symbolsData[symbol] = await getSymbolSeries(symbol);
-  }
+  const { symbolsData, failed } = await loadSymbolsDataSafe(symbols);
 
   const directSymbols = portfolios
     .filter(
@@ -893,9 +966,14 @@ async function compareMixed() {
 
   const seriesEntries = portfolios.map((portfolio, idx) => ({
     label: portfolio.label,
-    color: palette[idx % palette.length],
+    color: colorForSeries(idx),
     series: buildCompositeSeries(portfolio.assets, symbolsData, state.activeRange)
   }));
+
+  const plottable = seriesEntries.filter((s) => s.series.length > 0);
+  if (plottable.length < 1) {
+    throw new Error('No hay datos disponibles para graficar las selecciones válidas.');
+  }
 
   const { labels, datasets } = alignSeriesCollection(seriesEntries);
   if (!labels.length) {
@@ -904,6 +982,15 @@ async function compareMixed() {
 
   upsertChart(labels, datasets);
   renderPerformanceTable(portfolios, symbolsData);
+  const failedSymbols = failed.map((f) => f.symbol);
+  if (resolveErrors.length > 0 || failedSymbols.length > 0) {
+    const parts = [];
+    if (resolveErrors.length > 0) parts.push(`${resolveErrors.length} entrada(s) no resueltas`);
+    if (failedSymbols.length > 0) parts.push(`sin datos: ${failedSymbols.join(', ')}`);
+    setCompareWarning(`Advertencia: ${parts.join(' | ')}. Se graficaron las selecciones disponibles.`);
+  } else {
+    setCompareWarning('');
+  }
   state.lastCompare = {
     type: 'mixed',
     values: rawValues
@@ -923,15 +1010,12 @@ async function compareGroupComponents(groupIndex) {
     assets: [{ symbol, weight: 100 }]
   }));
 
-  const symbolsData = {};
-  for (const symbol of symbols) {
-    symbolsData[symbol] = await getSymbolSeries(symbol);
-  }
+  const { symbolsData, failed } = await loadSymbolsDataSafe(symbols);
   await Promise.all(symbols.map((s) => ensureSymbolName(s)));
 
   const seriesEntries = portfolios.map((portfolio, idx) => ({
     label: portfolio.label,
-    color: palette[idx % palette.length],
+    color: colorForSeries(idx),
     series: buildCompositeSeries(portfolio.assets, symbolsData, state.activeRange)
   }));
 
@@ -942,6 +1026,13 @@ async function compareGroupComponents(groupIndex) {
 
   upsertChart(labels, datasets);
   renderPerformanceTable(portfolios, symbolsData);
+  if (failed.length > 0) {
+    setCompareWarning(
+      `Advertencia: algunos componentes no tienen datos (${failed.map((f) => f.symbol).join(', ')}).`
+    );
+  } else {
+    setCompareWarning('');
+  }
   state.lastCompare = {
     type: 'group-components',
     groupIndex
@@ -1023,6 +1114,7 @@ clearCompareBtn?.addEventListener('click', async () => {
       if (field) field.value = '';
     });
     state.lastCompare = null;
+    setCompareWarning('');
     renderYoYMessage('YoY', 'Haz click en una serie de la leyenda para ver Year-over-Year.');
   });
 });

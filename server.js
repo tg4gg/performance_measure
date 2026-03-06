@@ -8,6 +8,7 @@ const CACHE_DIR = path.join(__dirname, '.cache', 'market-data');
 const RESOLVE_CACHE_FILE = path.join(__dirname, '.cache', 'resolve-cache.json');
 const ONE_DAY = 24 * 60 * 60;
 const RESOLVE_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const EXCHANGE_SUFFIX_FALLBACKS = ['.L', '.MI', '.AS', '.PA', '.DE', '.SW', '.MC', '.BR', '.TO'];
 
 const SYMBOL_OVERRIDES = {
   'EXXON': 'XOM',
@@ -26,8 +27,45 @@ const SYMBOL_OVERRIDES = {
   'GOLD': 'GC=F',
   'PLATA': 'SI=F',
   'SILVER': 'SI=F',
+  'BTC': 'BTC-USD',
   'BITCOIN': 'BTC-USD',
-  'ETHEREUM': 'ETH-USD'
+  'ETH': 'ETH-USD',
+  'ETHER': 'ETH-USD',
+  'ETHEREUM': 'ETH-USD',
+  'BNB': 'BNB-USD',
+  'BINANCE COIN': 'BNB-USD',
+  'SOL': 'SOL-USD',
+  'SOLANA': 'SOL-USD',
+  'XRP': 'XRP-USD',
+  'RIPPLE': 'XRP-USD',
+  'ADA': 'ADA-USD',
+  'CARDANO': 'ADA-USD',
+  'DOGE': 'DOGE-USD',
+  'DOGECOIN': 'DOGE-USD',
+  'TRX': 'TRX-USD',
+  'TRON': 'TRX-USD',
+  'AVAX': 'AVAX-USD',
+  'AVALANCHE': 'AVAX-USD',
+  'SHIB': 'SHIB-USD',
+  'SHIBA INU': 'SHIB-USD',
+  'LINK': 'LINK-USD',
+  'CHAINLINK': 'LINK-USD',
+  'DOT': 'DOT-USD',
+  'POLKADOT': 'DOT-USD',
+  'BCH': 'BCH-USD',
+  'BITCOIN CASH': 'BCH-USD',
+  'LTC': 'LTC-USD',
+  'LITECOIN': 'LTC-USD',
+  'XLM': 'XLM-USD',
+  'STELLAR': 'XLM-USD',
+  'HBAR': 'HBAR-USD',
+  'HEDERA': 'HBAR-USD',
+  'UNI': 'UNI-USD',
+  'UNISWAP': 'UNI-USD',
+  'ATOM': 'ATOM-USD',
+  'COSMOS': 'ATOM-USD',
+  'NEAR': 'NEAR-USD',
+  'ETC': 'ETC-USD'
 };
 
 app.use(express.static(path.join(__dirname, 'public')));
@@ -44,7 +82,11 @@ function normalizeSymbol(input) {
 
   if (cleaned.includes(' ')) return '';
 
-  const direct = cleaned.match(/\^?[A-Z]{1,5}(?:-[A-Z]{1,4}|=[A-Z])?/);
+  // Preserve explicit exchange-qualified symbols provided by user.
+  if (/^\^?[A-Z]{1,6}\.[A-Z]{1,5}$/.test(cleaned)) return cleaned;
+  if (/^\^?[A-Z]{1,6}(?:-[A-Z]{1,5}|=[A-Z])$/.test(cleaned)) return cleaned;
+
+  const direct = cleaned.match(/\^?[A-Z]{1,5}(?:\.[A-Z]{1,4}|-[A-Z]{1,4}|=[A-Z])?/);
   if (direct) return direct[0];
 
   return '';
@@ -197,12 +239,7 @@ function mergeByDate(existing = [], incoming = []) {
   return [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
-async function getSymbolData(symbol) {
-  const resolved = normalizeSymbol(symbol);
-  if (!resolved) {
-    throw new Error(`No se pudo resolver símbolo para: ${symbol}`);
-  }
-
+async function getSymbolDataForResolvedSymbol(resolved) {
   const nowSec = Math.floor(Date.now() / 1000);
   const today = new Date().toISOString().slice(0, 10);
 
@@ -237,6 +274,73 @@ async function getSymbolData(symbol) {
 
   await writeCache(resolved, payload);
   return payload;
+}
+
+function buildSymbolCandidates(baseSymbol) {
+  const symbol = String(baseSymbol || '').toUpperCase().trim();
+  if (!symbol) return [];
+  const candidates = [symbol];
+
+  // Try exchange-qualified variants only for plain symbols.
+  if (/^[A-Z0-9]{1,6}$/.test(symbol)) {
+    for (const suffix of EXCHANGE_SUFFIX_FALLBACKS) {
+      candidates.push(`${symbol}${suffix}`);
+    }
+  }
+
+  return [...new Set(candidates)];
+}
+
+async function getPreferredResolvedSymbol(baseSymbol) {
+  const key = String(baseSymbol || '').toUpperCase().trim();
+  if (!key) return '';
+  if (/\.[A-Z]{1,5}$/.test(key)) return key;
+  const cache = await readResolveCache();
+  const cached = cache[key];
+  if (cached && cached.symbol && Date.now() - cached.ts < RESOLVE_TTL_MS) {
+    return cached.symbol;
+  }
+  return key;
+}
+
+async function savePreferredResolvedSymbol(baseSymbol, resolvedSymbol) {
+  const key = String(baseSymbol || '').toUpperCase().trim();
+  const resolved = String(resolvedSymbol || '').toUpperCase().trim();
+  if (!key || !resolved || key === resolved) return;
+
+  const cache = await readResolveCache();
+  cache[key] = {
+    symbol: resolved,
+    name: cache[key]?.name || '',
+    source: 'suffix-fallback',
+    ts: Date.now()
+  };
+  await writeResolveCache(cache);
+}
+
+async function getSymbolData(symbol) {
+  const normalized = normalizeSymbol(symbol);
+  if (!normalized) {
+    throw new Error(`No se pudo resolver símbolo para: ${symbol}`);
+  }
+
+  const preferred = await getPreferredResolvedSymbol(normalized);
+  const candidates = [preferred, ...buildSymbolCandidates(normalized).filter((c) => c !== preferred)];
+  let lastError = null;
+
+  for (const candidate of candidates) {
+    try {
+      const payload = await getSymbolDataForResolvedSymbol(candidate);
+      if (candidate !== normalized) {
+        await savePreferredResolvedSymbol(normalized, candidate);
+      }
+      return payload;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error(`No se pudo obtener mercado para: ${normalized}`);
 }
 
 app.get('/api/performance', async (req, res) => {

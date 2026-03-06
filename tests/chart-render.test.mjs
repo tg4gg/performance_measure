@@ -17,10 +17,14 @@ const mockSeries = {
   NVDA: makeYearlyPoints(2021, [100, 118, 146, 162, 190, 228]),
   GLD: makeYearlyPoints(2021, [100, 103, 105, 108, 112, 115]),
   XOM: makeYearlyPoints(2021, [100, 109, 117, 126, 133, 141]),
+  'BTC-USD': makeYearlyPoints(2021, [100, 145, 132, 188, 210, 240]),
+  'ETH-USD': makeYearlyPoints(2021, [100, 138, 122, 170, 196, 225]),
   URA: makeYearlyPoints(2021, [100, 107, 111, 116, 121, 127]),
   AMZN: makeYearlyPoints(2021, [100, 106, 114, 121, 129, 137]),
   SLVR: makeYearlyPoints(2025, [100, 104]),
-  MSFT: makeYearlyPoints(2021, [100, 109, 121, 132, 145, 156])
+  MSFT: makeYearlyPoints(2021, [100, 109, 121, 132, 145, 156]),
+  EQQQ: makeYearlyPoints(2021, [100, 104, 112, 125, 136, 148]),
+  'EQQQ.L': makeYearlyPoints(2021, [100, 104, 112, 125, 136, 148])
 };
 
 function buildHtml() {
@@ -34,6 +38,7 @@ function buildHtml() {
     <div id="groupsContainer"></div>
     <button id="runCompareBtn"></button>
     <button id="clearCompareBtn"></button>
+    <div id="compareWarning"></div>
     <input id="compareField1" />
     <input id="compareField2" />
     <input id="compareField3" />
@@ -275,6 +280,48 @@ describe('chart rendering flows', () => {
 
     expect(global.__chartInstance).toBeTruthy();
     expect(global.__chartInstance.data.datasets.map((d) => d.label)).toEqual(['AAPL', 'XOM']);
+  });
+
+  it('maps major crypto symbols directly to spot pairs', async () => {
+    document.getElementById('compareField1').value = 'BTC';
+    document.getElementById('compareField2').value = 'ETH';
+    document.getElementById('runCompareBtn').click();
+    await tick();
+
+    expect(global.__chartInstance).toBeTruthy();
+    expect(global.__chartInstance.data.datasets.map((d) => d.label)).toEqual(['BTC-USD', 'ETH-USD']);
+  });
+
+  it('still plots valid series when one ticker is invalid and shows warning', async () => {
+    document.getElementById('compareField1').value = 'AAPL';
+    document.getElementById('compareField2').value = 'NOTAREALTICKER';
+    document.getElementById('runCompareBtn').click();
+    await tick();
+
+    expect(global.__chartInstance).toBeTruthy();
+    expect(global.__chartInstance.data.datasets.map((d) => d.label)).toEqual(['AAPL']);
+    expect(document.getElementById('compareWarning').textContent).toContain('Advertencia:');
+  });
+
+  it('handles EQQQ as a valid series and plots with others', async () => {
+    document.getElementById('compareField1').value = 'AAPL';
+    document.getElementById('compareField2').value = 'EQQQ';
+    document.getElementById('runCompareBtn').click();
+    await tick();
+
+    expect(global.__chartInstance).toBeTruthy();
+    expect(global.__chartInstance.data.datasets.map((d) => d.label)).toEqual(['AAPL', 'EQQQ']);
+    expect(document.getElementById('compareWarning').textContent).toBe('');
+  });
+
+  it('keeps exchange suffix tickers like EQQQ.L without truncating to EQQQ', async () => {
+    document.getElementById('compareField1').value = 'AAPL';
+    document.getElementById('compareField2').value = 'EQQQ.L';
+    document.getElementById('runCompareBtn').click();
+    await tick();
+
+    expect(global.__chartInstance).toBeTruthy();
+    expect(global.__chartInstance.data.datasets.map((d) => d.label)).toEqual(['AAPL', 'EQQQ.L']);
   });
 
   it('supports second column allocation in multiline text input', async () => {

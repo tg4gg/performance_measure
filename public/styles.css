@@ -220,6 +220,13 @@ label {
   color: var(--muted);
 }
 
+.compare-warning {
+  min-height: 1.2em;
+  margin-top: 8px;
+  color: #ffcb6b;
+  font-size: 0.9rem;
+}
+
 .chart-wrap {
   position: relative;
   height: clamp(260px, 42vh, 460px);
