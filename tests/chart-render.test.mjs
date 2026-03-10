@@ -66,8 +66,11 @@ function buildHtml() {
     <input id="compareField3" />
     <input id="compareField4" />
     <datalist id="compareSuggestions"></datalist>
+    <input id="customRangeDate" />
+    <button id="applyCustomRangeBtn"></button>
+    <div id="activeRangeNote"></div>
     <table>
-      <thead><tr><th id="perfHeadLabel"></th><th id="perfHeadYtd"></th><th id="perfHead1y"></th><th id="perfHead3y"></th><th id="perfHeadAllTime"></th><th id="perfHeadGainUsd"></th><th id="perfHeadGainPerUnit"></th><th id="perfHeadValueUsd"></th><th id="perfHeadValueEur"></th></tr></thead>
+      <thead><tr><th id="perfHeadLabel"></th><th id="perfHeadYtd"></th><th id="perfHead1y"></th><th id="perfHead3y"></th><th id="perfHeadCustom"></th><th id="perfHeadAllTime"></th><th id="perfHeadGainUsd"></th><th id="perfHeadGainPerUnit"></th><th id="perfHeadValueUsd"></th><th id="perfHeadValueEur"></th></tr></thead>
       <tbody id="perfTableBody"></tbody>
     </table>
     <table>
@@ -416,6 +419,27 @@ describe('chart rendering flows', () => {
     expect(document.querySelectorAll('#yoyTableBody tr').length).toBeGreaterThan(0);
   });
 
+  it('rebases comparison series from a selected purchase date and shows the return to today', async () => {
+    document.getElementById('customRangeDate').value = '2024-01-02';
+    document.getElementById('customRangeDate').dispatchEvent(new window.Event('input'));
+    document.getElementById('applyCustomRangeBtn').click();
+    await tick();
+
+    document.getElementById('compareField1').value = 'AAPL';
+    document.getElementById('compareField2').value = 'MSFT';
+    document.getElementById('runCompareBtn').click();
+    await tick();
+
+    expect(global.__chartInstance).toBeTruthy();
+    expect(global.__chartInstance.data.labels).toEqual(['2024-01-02', '2025-01-02', '2026-01-02']);
+    expect(global.__chartInstance.data.datasets[0].data[0]).toBe(100);
+    expect(document.getElementById('activeRangeNote').textContent).toContain('2024-01-02');
+    expect(document.getElementById('perfHeadCustom').textContent).toContain('2024-01-02');
+
+    const cells = [...document.querySelectorAll('#perfTableBody tr:first-child td')].map((cell) => cell.textContent.trim());
+    expect(cells[4]).toBe('+21.74%');
+  });
+
   it('shows YoY unavailable message for non-supported ranges', async () => {
     document.querySelector('button[data-range="ytd"]').click();
     await tick();
@@ -654,10 +678,45 @@ describe('chart rendering flows', () => {
     expect(global.__chartInstance.data.datasets[0].label).toContain('buy 2024-01-02');
 
     const cells = [...document.querySelectorAll('#perfTableBody tr:first-child td')].map((cell) => cell.textContent.trim());
-    expect(cells[4]).toBe('+76.84%');
-    expect(cells[5]).toBe('$146.00');
-    expect(cells[6]).toBe('$73.00');
-    expect(cells[7]).toBe('$336.00');
-    expect(cells[8]).toBe('€280.00');
+    expect(cells[5]).toBe('+76.84%');
+    expect(cells[6]).toBe('$146.00');
+    expect(cells[7]).toBe('$73.00');
+    expect(cells[8]).toBe('$336.00');
+    expect(cells[9]).toBe('€280.00');
+  });
+
+  it('overrides MPM chart rebasing from a selected purchase date without changing all-time cost basis', async () => {
+    document.querySelector('[data-mode="mpm"]').click();
+    await tick();
+
+    const rawInput = document.getElementById('rawInput');
+    const detectBtn = document.getElementById('detectBtn');
+    const groupName = document.getElementById('groupName');
+    const saveGroupBtn = document.getElementById('saveGroupBtn');
+
+    rawInput.value = 'AAPL, price=95, units=2, buyDate=2023-01-02';
+    rawInput.dispatchEvent(new window.Event('input'));
+    detectBtn.click();
+    await tick();
+    groupName.value = 'Bought AAPL';
+    groupName.dispatchEvent(new window.Event('input'));
+    saveGroupBtn.click();
+    await tick();
+
+    document.getElementById('customRangeDate').value = '2024-01-02';
+    document.getElementById('customRangeDate').dispatchEvent(new window.Event('input'));
+    document.getElementById('applyCustomRangeBtn').click();
+    await tick();
+
+    document.getElementById('compareField1').value = 'Bought AAPL';
+    document.getElementById('runCompareBtn').click();
+    await tick();
+
+    expect(global.__chartInstance).toBeTruthy();
+    expect(global.__chartInstance.data.labels[0]).toBe('2024-01-02');
+
+    const cells = [...document.querySelectorAll('#perfTableBody tr:first-child td')].map((cell) => cell.textContent.trim());
+    expect(cells[4]).toBe('+21.74%');
+    expect(cells[5]).toBe('+76.84%');
   });
 });

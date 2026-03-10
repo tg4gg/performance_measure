@@ -70,13 +70,20 @@
         </div>
         <div id="compareWarning" class="compare-warning" aria-live="polite"></div>
 
-        <div class="range-buttons" id="rangeButtons">
-          <button type="button" data-range="ytd" class="active">Year to date</button>
-          <button type="button" data-range="1y">One year</button>
-          <button type="button" data-range="3y">Three years</button>
-          <button type="button" data-range="5y">Five years</button>
-          <button type="button" data-range="10y">Ten years</button>
+        <div class="range-toolbar">
+          <div class="range-buttons" id="rangeButtons">
+            <button type="button" data-range="ytd" class="active">Year to date</button>
+            <button type="button" data-range="1y">One year</button>
+            <button type="button" data-range="3y">Three years</button>
+            <button type="button" data-range="5y">Five years</button>
+            <button type="button" data-range="10y">Ten years</button>
+          </div>
+          <div class="range-custom">
+            <input id="customRangeDate" type="date" aria-label="Purchase date" />
+            <button id="applyCustomRangeBtn" type="button">Since purchase date</button>
+          </div>
         </div>
+        <div id="activeRangeNote" class="muted range-note"></div>
 
         <div id="chartLegend" class="chart-legend"></div>
 
@@ -92,6 +99,7 @@
                 <th id="perfHeadYtd">YTD</th>
                 <th id="perfHead1y">1Y</th>
                 <th id="perfHead3y">3Y</th>
+                <th id="perfHeadCustom">Selected date</th>
                 <th id="perfHeadAllTime">All time %</th>
                 <th id="perfHeadGainUsd">Gain USD</th>
                 <th id="perfHeadGainPerUnit">Gain/unit</th>

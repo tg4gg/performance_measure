@@ -155,6 +155,7 @@ function createModeState(mode) {
     draftItems: [],
     collections: Array.isArray(stored) ? stored : [],
     activeRange: 'ytd',
+    customRangeDate: '',
     lastCompare: null,
     editingIndex: null,
     rawInput: '',
@@ -219,6 +220,7 @@ const perfHeadLabel = document.getElementById('perfHeadLabel');
 const perfHeadYtd = document.getElementById('perfHeadYtd');
 const perfHead1y = document.getElementById('perfHead1y');
 const perfHead3y = document.getElementById('perfHead3y');
+const perfHeadCustom = document.getElementById('perfHeadCustom');
 const perfHeadAllTime = document.getElementById('perfHeadAllTime');
 const perfHeadGainUsd = document.getElementById('perfHeadGainUsd');
 const perfHeadGainPerUnit = document.getElementById('perfHeadGainPerUnit');
@@ -230,6 +232,9 @@ const yoyTableBody = document.getElementById('yoyTableBody');
 const chartLegend = document.getElementById('chartLegend');
 const compareWarning = document.getElementById('compareWarning');
 const rangeButtons = document.getElementById('rangeButtons');
+const customRangeDate = document.getElementById('customRangeDate');
+const applyCustomRangeBtn = document.getElementById('applyCustomRangeBtn');
+const activeRangeNote = document.getElementById('activeRangeNote');
 const pendingSymbolNameRequests = new Map();
 let pendingMpmMetricsRefresh = null;
 
@@ -1126,9 +1131,13 @@ function fillNextComparisonField(value) {
   modeState.compareDraft = compareFields.map((field) => field.value || '');
 }
 
-function trimToRange(points, range) {
-  if (points.length === 0) return [];
-  if (range === 'all') return points;
+function getRangeStartDate(points, range, options = {}) {
+  if (points.length === 0) return null;
+  if (range === 'all') return null;
+  if (range === 'custom') {
+    const customStartDate = sanitizeDate(options.customStartDate);
+    return customStartDate || null;
+  }
 
   const lastDate = new Date(points[points.length - 1].date + 'T00:00:00Z');
   const start = new Date(lastDate);
@@ -1139,7 +1148,14 @@ function trimToRange(points, range) {
   if (range === '5y') start.setUTCFullYear(start.getUTCFullYear() - 5);
   if (range === '10y') start.setUTCFullYear(start.getUTCFullYear() - 10);
 
-  return points.filter((point) => new Date(point.date + 'T00:00:00Z') >= start);
+  return start.toISOString().slice(0, 10);
+}
+
+function trimToRange(points, range, options = {}) {
+  if (points.length === 0) return [];
+  const startDate = getRangeStartDate(points, range, options);
+  if (!startDate) return points;
+  return points.filter((point) => point.date >= startDate);
 }
 
 function normalizeTo100(points) {
@@ -1186,10 +1202,10 @@ function combineWeightedSeries(entries) {
   return result;
 }
 
-function buildPmCompositeSeries(assets, symbolsData, range) {
+function buildPmCompositeSeries(assets, symbolsData, range, options = {}) {
   const prepared = assets
     .map((asset) => {
-      const trimmed = trimToRange(symbolsData[asset.symbol] || [], range);
+      const trimmed = trimToRange(symbolsData[asset.symbol] || [], range, options);
       const normalizedSeries = normalizeTo100(trimmed);
       return {
         symbol: asset.symbol,
@@ -1208,46 +1224,76 @@ function getHoldingEntryPoint(points, holding) {
   return points.find((point) => point.date >= buyDate) || null;
 }
 
-function buildMpmHoldingSeries(points, holding, range) {
-  if (!Array.isArray(points) || points.length === 0) return [];
-  const entryPoint = getHoldingEntryPoint(points, holding);
-  const fallbackBase = entryPoint?.close ?? points[0]?.close;
-  const purchasePrice = holding.purchasePrice != null && holding.purchasePrice > 0 ? holding.purchasePrice : fallbackBase;
-  if (!purchasePrice) return [];
+function getHoldingEntryPointForRange(points, holding, options = {}) {
+  const overrideStartDate = sanitizeDate(options.customStartDate);
+  if (overrideStartDate) {
+    return points.find((point) => point.date >= overrideStartDate) || null;
+  }
+  return getHoldingEntryPoint(points, holding);
+}
 
-  const startDate = entryPoint?.date || points[0]?.date;
+function getEffectiveHoldingClose(point, sellDate, soldClose) {
+  if (!point) return null;
+  if (sellDate && soldClose != null && point.date > sellDate) {
+    return soldClose;
+  }
+  return point.close;
+}
+
+function buildMpmHoldingSeries(points, holding, range, options = {}) {
+  if (!Array.isArray(points) || points.length === 0) return [];
   const sellDate = sanitizeDate(holding.sellDate);
   const soldPoint = sellDate ? [...points].reverse().find((point) => point.date <= sellDate) : null;
   const soldClose = soldPoint?.close ?? null;
+  const entryPoint = getHoldingEntryPointForRange(points, holding, range === 'custom' ? options : {});
+  const entryClose = getEffectiveHoldingClose(entryPoint, sellDate, soldClose);
+  const fallbackBase = entryClose ?? points[0]?.close;
+  const purchasePrice =
+    range === 'custom'
+      ? entryClose
+      : holding.purchasePrice != null && holding.purchasePrice > 0
+        ? holding.purchasePrice
+        : fallbackBase;
+  if (!purchasePrice) return [];
+
+  const startDate = entryPoint?.date || getRangeStartDate(points, range, options) || points[0]?.date;
 
   const normalized = points
     .filter((point) => !startDate || point.date >= startDate)
     .map((point) => {
-      const effectiveClose = sellDate && soldClose != null && point.date > sellDate ? soldClose : point.close;
+      const effectiveClose = getEffectiveHoldingClose(point, sellDate, soldClose);
       return {
         date: point.date,
         value: (effectiveClose / purchasePrice) * 100
       };
     });
 
-  return trimToRange(normalized, range);
+  return trimToRange(normalized, range, options);
 }
 
-function buildMpmCompositeSeries(holdings, symbolsData, range) {
+function buildMpmCompositeSeries(holdings, symbolsData, range, options = {}) {
   const prepared = holdings
     .map((holding) => {
       const points = symbolsData[holding.symbol] || [];
       if (!points.length) return null;
-      const entryPoint = getHoldingEntryPoint(points, holding);
-      const fallbackBase = entryPoint?.close ?? points[0]?.close;
+      const sellDate = sanitizeDate(holding.sellDate);
+      const soldPoint = sellDate ? [...points].reverse().find((point) => point.date <= sellDate) : null;
+      const soldClose = soldPoint?.close ?? null;
+      const entryPoint = getHoldingEntryPointForRange(points, holding, range === 'custom' ? options : {});
+      const entryClose = getEffectiveHoldingClose(entryPoint, sellDate, soldClose);
+      const fallbackBase = entryClose ?? points[0]?.close;
       const basePerUnit =
-        holding.purchasePrice != null && holding.purchasePrice > 0 ? holding.purchasePrice : fallbackBase;
+        range === 'custom'
+          ? entryClose
+          : holding.purchasePrice != null && holding.purchasePrice > 0
+            ? holding.purchasePrice
+            : fallbackBase;
       const units = holding.units != null && holding.units > 0 ? holding.units : 1;
       const baseCost = basePerUnit && units ? basePerUnit * units : 0;
       return {
         symbol: holding.symbol,
         weight: baseCost,
-        series: buildMpmHoldingSeries(points, holding, range)
+        series: buildMpmHoldingSeries(points, holding, range, options)
       };
     })
     .filter(Boolean)
@@ -1385,6 +1431,7 @@ const htmlLegendPlugin = {
 
 function upsertChart(labels, datasets) {
   const ctx = document.getElementById('chart');
+  const axisTitle = getChartAxisTitle();
 
   if (state.chart) {
     if (typeof state.chart.resetZoom === 'function') {
@@ -1392,6 +1439,9 @@ function upsertChart(labels, datasets) {
     }
     state.chart.data.labels = labels;
     state.chart.data.datasets = datasets;
+    if (state.chart.options?.scales?.y?.title) {
+      state.chart.options.scales.y.title.text = axisTitle;
+    }
     state.chart.update();
     renderYoYMessage('YoY', 'Haz click en una serie de la leyenda para ver Year-over-Year.');
     return;
@@ -1459,7 +1509,7 @@ function upsertChart(labels, datasets) {
           grid: { color: '#22385f' },
           title: {
             display: true,
-            text: 'Base 100',
+            text: axisTitle,
             color: '#97abc8'
           }
         }
@@ -1507,6 +1557,41 @@ function formatEur(value) {
   return formatCurrency(value, 'EUR');
 }
 
+function getCustomRangeLabel(modeState = getActiveModeState()) {
+  const date = sanitizeDate(modeState.customRangeDate);
+  return date ? `Since ${date}` : 'Selected date';
+}
+
+function getChartAxisTitle(modeState = getActiveModeState()) {
+  if (modeState.activeRange === 'custom' && sanitizeDate(modeState.customRangeDate)) {
+    return `Base 100 since ${sanitizeDate(modeState.customRangeDate)}`;
+  }
+  return 'Base 100';
+}
+
+function renderRangeControls(modeState = getActiveModeState()) {
+  document
+    .querySelectorAll('#rangeButtons button')
+    .forEach((button) => button.classList.toggle('active', button.dataset.range === modeState.activeRange));
+
+  if (perfHeadCustom) {
+    perfHeadCustom.textContent = getCustomRangeLabel(modeState);
+  }
+
+  if (customRangeDate) {
+    customRangeDate.value = modeState.customRangeDate || '';
+  }
+  if (applyCustomRangeBtn) {
+    applyCustomRangeBtn.classList.toggle('active', modeState.activeRange === 'custom');
+  }
+  if (activeRangeNote) {
+    activeRangeNote.textContent =
+      modeState.activeRange === 'custom' && sanitizeDate(modeState.customRangeDate)
+        ? `Comparando desde ${sanitizeDate(modeState.customRangeDate)} con base 100 al primer precio disponible.`
+        : '';
+  }
+}
+
 function renderYoYMessage(title, message) {
   if (!yoyTableBody || !yoyTitle) return;
   yoyTitle.textContent = title || 'YoY';
@@ -1516,6 +1601,23 @@ function renderYoYMessage(title, message) {
 function setCompareWarning(message) {
   if (!compareWarning) return;
   compareWarning.textContent = message || '';
+}
+
+async function rerunLastComparison(mode = state.activeMode) {
+  const modeState = getModeState(mode);
+  if (!modeState.lastCompare) return;
+
+  if (modeState.lastCompare.type === 'mixed') {
+    compareFields.forEach((field, index) => {
+      field.value = modeState.lastCompare.values[index] || '';
+    });
+    await compareMixed(mode);
+    return;
+  }
+
+  if (modeState.lastCompare.type === 'collection-components') {
+    await compareCollectionComponents(modeState.lastCompare.index, mode);
+  }
 }
 
 function buildYoYRows(labels, data) {
@@ -1696,15 +1798,15 @@ async function loadSymbolsDataSafe(symbols) {
   return { symbolsData, failed };
 }
 
-function buildEntrySeries(entry, symbolsData, range, mode = state.activeMode) {
+function buildEntrySeries(entry, symbolsData, range, mode = state.activeMode, options = {}) {
   if (mode === 'pm') {
-    return buildPmCompositeSeries(entry.assets || [], symbolsData, range);
+    return buildPmCompositeSeries(entry.assets || [], symbolsData, range, options);
   }
-  return buildMpmCompositeSeries(entry.holdings || [], symbolsData, range);
+  return buildMpmCompositeSeries(entry.holdings || [], symbolsData, range, options);
 }
 
-function computeEntryReturn(entry, symbolsData, range, mode = state.activeMode) {
-  const series = buildEntrySeries(entry, symbolsData, range, mode);
+function computeEntryReturn(entry, symbolsData, range, mode = state.activeMode, options = {}) {
+  const series = buildEntrySeries(entry, symbolsData, range, mode, options);
   if (!series.length) return null;
   const first = series[0]?.value;
   const last = series[series.length - 1]?.value;
@@ -1786,6 +1888,9 @@ function computeEntrySnapshot(entry, symbolsData, mode = state.activeMode) {
 
 function renderPerformanceTable(entries, symbolsData, mode = state.activeMode) {
   if (!perfTableBody) return;
+  const modeState = getModeState(mode);
+  const selectedDateActive = modeState.activeRange === 'custom' && sanitizeDate(modeState.customRangeDate);
+  const customRangeOptions = selectedDateActive ? { customStartDate: modeState.customRangeDate } : {};
   const rows = entries.map((entry) => ({
     label: entry.label,
     symbol:
@@ -1796,6 +1901,7 @@ function renderPerformanceTable(entries, symbolsData, mode = state.activeMode) {
     ytd: computeEntryReturn(entry, symbolsData, 'ytd', mode),
     oneYear: computeEntryReturn(entry, symbolsData, '1y', mode),
     threeYears: computeEntryReturn(entry, symbolsData, '3y', mode),
+    selectedDate: selectedDateActive ? computeEntryReturn(entry, symbolsData, 'custom', mode, customRangeOptions) : null,
     ...computeEntrySnapshot(entry, symbolsData, mode)
   }));
 
@@ -1809,6 +1915,7 @@ function renderPerformanceTable(entries, symbolsData, mode = state.activeMode) {
         <td>${formatPct(row.ytd)}</td>
         <td>${formatPct(row.oneYear)}</td>
         <td>${formatPct(row.threeYears)}</td>
+        <td>${formatPct(row.selectedDate)}</td>
         <td>${formatPct(row.allTimePct)}</td>
         <td>${formatUsd(row.totalGainUsd)}</td>
         <td>${formatUsd(row.gainPerUnit)}</td>
@@ -1860,11 +1967,13 @@ async function compareMixed(mode = state.activeMode) {
 
   const directSymbols = entries.filter((entry) => entry.type === 'symbol').map((entry) => entry.label);
   await Promise.all(directSymbols.map((symbol) => ensureSymbolName(symbol)));
+  const rangeOptions =
+    modeState.activeRange === 'custom' ? { customStartDate: modeState.customRangeDate } : {};
 
   const seriesEntries = entries.map((entry, index) => ({
     label: entry.label,
     color: colorForSeries(index),
-    series: buildEntrySeries(entry, symbolsData, modeState.activeRange, mode)
+    series: buildEntrySeries(entry, symbolsData, modeState.activeRange, mode, rangeOptions)
   }));
 
   const plottable = seriesEntries.filter((entry) => entry.series.length > 0);
@@ -1938,11 +2047,13 @@ async function compareCollectionComponents(index, mode = state.activeMode) {
 
   const { symbolsData, failed } = await loadSymbolsDataSafe(symbols);
   await Promise.all(symbols.map((symbol) => ensureSymbolName(symbol)));
+  const rangeOptions =
+    getModeState(mode).activeRange === 'custom' ? { customStartDate: getModeState(mode).customRangeDate } : {};
 
   const seriesEntries = entries.map((entry, indexInList) => ({
     label: entry.label,
     color: colorForSeries(indexInList),
-    series: buildEntrySeries(entry, symbolsData, getModeState(mode).activeRange, mode)
+    series: buildEntrySeries(entry, symbolsData, getModeState(mode).activeRange, mode, rangeOptions)
   }));
 
   const { labels, datasets } = alignSeriesCollection(seriesEntries);
@@ -2086,6 +2197,7 @@ function renderModeUi() {
   perfHeadYtd.textContent = 'YTD';
   perfHead1y.textContent = '1Y';
   perfHead3y.textContent = '3Y';
+  if (perfHeadCustom) perfHeadCustom.textContent = getCustomRangeLabel(modeState);
   if (perfHeadAllTime) perfHeadAllTime.textContent = 'All time %';
   if (perfHeadGainUsd) perfHeadGainUsd.textContent = 'Gain USD';
   if (perfHeadGainPerUnit) perfHeadGainPerUnit.textContent = 'Gain/unit';
@@ -2100,9 +2212,7 @@ function renderModeUi() {
 
   input.value = modeState.rawInput || '';
   groupName.value = modeState.draftName || '';
-  document
-    .querySelectorAll('#rangeButtons button')
-    .forEach((button) => button.classList.toggle('active', button.dataset.range === modeState.activeRange));
+  renderRangeControls(modeState);
 
   detectInfo.textContent = '';
   renderAssetsDraft();
@@ -2236,24 +2346,38 @@ rangeButtons.addEventListener('click', async (event) => {
   if (!button) return;
 
   getActiveModeState().activeRange = button.dataset.range;
-  document
-    .querySelectorAll('#rangeButtons button')
-    .forEach((element) => element.classList.toggle('active', element === button));
+  renderRangeControls(getActiveModeState());
 
   if (!getActiveModeState().lastCompare) return;
 
   await withButtonProcessing(button, async () => {
     try {
-      if (getActiveModeState().lastCompare.type === 'mixed') {
-        compareFields.forEach((field, index) => {
-          field.value = getActiveModeState().lastCompare.values[index] || '';
-        });
-        await compareMixed(state.activeMode);
-      } else if (getActiveModeState().lastCompare.type === 'collection-components') {
-        await compareCollectionComponents(getActiveModeState().lastCompare.index, state.activeMode);
-      }
+      await rerunLastComparison(state.activeMode);
     } catch (err) {
       alert(err.message || 'No se pudo refrescar el rango');
+    }
+  });
+});
+
+applyCustomRangeBtn?.addEventListener('click', async () => {
+  await withButtonProcessing(applyCustomRangeBtn, async () => {
+    const nextDate = sanitizeDate(customRangeDate?.value);
+    if (!nextDate) {
+      alert('Selecciona una fecha valida para rebalancear la serie.');
+      return;
+    }
+
+    const modeState = getActiveModeState();
+    modeState.customRangeDate = nextDate;
+    modeState.activeRange = 'custom';
+    renderRangeControls(modeState);
+
+    if (!modeState.lastCompare) return;
+
+    try {
+      await rerunLastComparison(state.activeMode);
+    } catch (err) {
+      alert(err.message || 'No se pudo aplicar la fecha seleccionada');
     }
   });
 });
@@ -2277,6 +2401,13 @@ groupName.addEventListener('input', () => {
 
 compareFields.forEach((field) => {
   field.addEventListener('input', syncCompareDraftFromInputs);
+});
+
+customRangeDate?.addEventListener('input', () => {
+  getActiveModeState().customRangeDate = sanitizeDate(customRangeDate.value);
+  if (getActiveModeState().activeRange === 'custom') {
+    renderRangeControls(getActiveModeState());
+  }
 });
 
 renderModeUi();

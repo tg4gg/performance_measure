@@ -296,16 +296,42 @@ button.danger {
   margin-top: 10px;
 }
 
+.range-toolbar {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 8px;
+}
+
 .range-buttons {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 14px 0;
 }
 
 .range-buttons button.active {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.range-custom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.range-custom input {
+  width: auto;
+  min-width: 190px;
+}
+
+.range-custom button.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.range-note {
+  min-height: 1.2em;
 }
 
 .chart-legend {
@@ -404,6 +430,7 @@ button.danger {
   .asset-row.subset-row,
   .group-row,
   .metrics-grid,
+  .range-custom,
   .subset-builder,
   .stack-mobile {
     grid-template-columns: 1fr;

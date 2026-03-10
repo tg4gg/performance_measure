@@ -204,6 +204,26 @@ Click en nombre de grupo/portfolio o en componente/holding:
 - rellena el siguiente campo vacío
 - si todos están ocupados, sobrescribe el primer campo
 
+### 7.4 Comparación desde fecha manual
+
+Debe existir un selector de fecha manual con acción explícita para ejecutar una comparación "como si se hubiera comprado ese día".
+
+Reglas:
+
+- el usuario selecciona una fecha y activa el modo `Since purchase date`
+- el gráfico debe empezar en el primer dato disponible en o después de esa fecha
+- la serie debe rebalancearse a base 100 en ese punto
+- la tabla resumen debe mostrar una columna adicional con el retorno desde esa fecha hasta hoy
+- el encabezado de esa columna debe reflejar la fecha seleccionada
+- debe mostrarse una nota visible indicando que la comparación actual está rebalanceada desde la fecha elegida
+- cambiar entre `YTD`, `1Y`, `3Y`, `5Y`, `10Y` y el rango manual debe recalcular la vista activa
+
+Reglas específicas por modo:
+
+- PM: el retorno desde fecha manual usa el mismo mecanismo de series compuestas base 100
+- MPM: el chart también debe rebalancearse desde la fecha manual como compra hipotética
+- MPM: las métricas de snapshot (`All time %`, `Gain USD`, `Gain/unit`, `Value USD`, `Value EUR`) deben seguir usando el costo base real guardado, no la fecha manual
+
 ## 8) Serie compuesta
 
 ### 8.1 PM
@@ -229,6 +249,7 @@ Para un portfolio:
 4. construir serie individual del holding:
    - empieza en `buyDate`/primer dato
    - si hay `sellDate`, mantener valor fijo después de esa fecha
+   - si el rango activo es fecha manual, el inicio efectivo del chart pasa a ser esa fecha manual y la base del chart se toma del precio disponible en ese punto
 5. combinar holdings con promedio ponderado por costo base
 
 ## 9) Rango temporal
@@ -240,11 +261,18 @@ Botones:
 - `3Y`
 - `5Y`
 - `10Y`
+- fecha manual `Since purchase date`
 
 Al cambiar rango se recalcula la vista activa:
 
 - comparación unificada, o
 - vista de componentes/holdings
+
+Para fecha manual:
+
+- debe guardarse la fecha seleccionada por modo
+- el rango activo pasa a `custom`
+- si no hay fecha válida, no debe activarse
 
 ## 10) Gráfico y leyenda
 

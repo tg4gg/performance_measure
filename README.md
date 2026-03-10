@@ -20,7 +20,8 @@ Web app para analizar performance de activos financieros en dos modos paralelos:
   - OpenFIGI para WKN/ISIN cuando Yahoo no devuelve match directo
 - Caché local de resolución de símbolos.
 - Chart.js con zoom y leyenda HTML custom.
-- Tabla resumen con `YTD`, `1Y`, `3Y`.
+- Selector de rango con `YTD`, `1Y`, `3Y`, `5Y`, `10Y` y fecha manual de compra.
+- Tabla resumen con `YTD`, `1Y`, `3Y` y retorno desde fecha seleccionada.
 - Tabla YoY por serie en rangos `3Y`, `5Y`, `10Y`.
 
 ## Modo PM
@@ -33,6 +34,7 @@ Web app para analizar performance de activos financieros en dos modos paralelos:
 - CRUD de grupos ponderados.
 - Comparación entre tickers y/o grupos.
 - `Ver componentes` para desplegar series subyacentes del grupo.
+- Comparación desde una fecha manual para simular compra en un día concreto y ver la evolución hasta hoy.
 
 ## Modo MPM
 
@@ -47,9 +49,11 @@ Web app para analizar performance de activos financieros en dos modos paralelos:
   - portfolios
   - subsets
   - stocks directos
+- Selector manual `Since purchase date` para rebalancear el chart como compra hipotética desde una fecha concreta.
 - `buyDate` define cuándo entra una posición al cálculo.
 - `sellDate` congela la posición desde la fecha de venta.
 - Los portfolios ponderan por costo base (`purchasePrice * units`, o fallback al primer precio disponible si falta).
+- En MPM, el rango manual rebasa el chart desde la fecha elegida sin alterar `All time %`, `Gain USD`, `Gain/unit`, `Value USD` ni `Value EUR`, que siguen usando el costo base real guardado.
 - En la sección `2)` se muestran 5 métricas para:
   - cada compra concreta en el draft
   - cada subset agregado
@@ -141,4 +145,4 @@ Cliente:
 ## Release
 
 - Rama de desarrollo: `portfolio_tracking`
-- Release solicitado: `v0.1`
+- Release actual: `v0.3`
