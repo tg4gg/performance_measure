@@ -183,6 +183,7 @@ Reglas:
 - mínimo 1 selección válida
 - el botón de acción debe permitir ejecutar también con una sola selección
 - copy actual del botón: `Analizar seleccion`
+- `Limpiar seleccion` debe vaciar inputs y limpiar chart, tabla, advertencias y estado visual asociado a la comparación actual
 
 ### 7.2 Entradas permitidas por modo
 

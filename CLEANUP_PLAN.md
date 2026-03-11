@@ -8,6 +8,12 @@ Phase 1 completed on 2026-03-11.
 - Fixed future-`buyDate` exclusion for MPM holdings when no market data exists yet.
 - Blocked deletion of saved MPM portfolios that are still referenced as subsets.
 - Added explicit section-2 metric errors for missing holding market data and stopped caching incomplete totals.
+- Current validation status after Phase 1: `26/26` tests passing.
+
+Phase 2 completed on 2026-03-11.
+- Wired `Limpiar seleccion` to clear the active rendered comparison state.
+- Added regression coverage for chart/table reset on clear.
+- Version bumped to `0.4.0`.
 - Current validation status: `26/26` tests passing.
 
 ## Goal
@@ -106,6 +112,7 @@ Required tests:
 ### 4. `Limpiar seleccion` does not clear the chart/table output
 
 Severity: Low
+Status: Completed on 2026-03-11
 
 Problem:
 - The clear button clears inputs and warnings.
@@ -182,9 +189,9 @@ Follow this order unless new information forces reprioritization:
 
 ### Phase 2: UX Consistency
 
-- [ ] Wire `Limpiar seleccion` to clear the visualization state.
-- [ ] Extend the existing clear-button test to cover chart/table reset.
-- [ ] Run `npm test`.
+- [x] Wire `Limpiar seleccion` to clear the visualization state.
+- [x] Extend the existing clear-button test to cover chart/table reset.
+- [x] Run `npm test`.
 
 ### Phase 3: Performance
 

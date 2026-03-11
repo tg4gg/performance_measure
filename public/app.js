@@ -2407,8 +2407,7 @@ clearCompareBtn?.addEventListener('click', async () => {
     });
     getActiveModeState().compareDraft = ['', '', '', ''];
     getActiveModeState().lastCompare = null;
-    setCompareWarning('');
-    renderYoYMessage('YoY', 'Haz click en una serie de la leyenda para ver Year-over-Year.');
+    clearVisualization();
   });
 });
 

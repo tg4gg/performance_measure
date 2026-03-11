@@ -9,6 +9,7 @@ Web app para analizar performance de activos financieros en dos modos paralelos:
 
 - Cambio seamless entre PM y MPM desde la misma UI.
 - Comparación con 1 a 4 selecciones.
+- `Limpiar seleccion` vacía los inputs y resetea chart, tabla y estado visual de la comparación activa.
 - Resolución de identificadores por:
   - ticker
   - alias local

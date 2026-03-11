@@ -504,11 +504,23 @@ describe('chart rendering flows', () => {
   it('clears unified comparison inputs with clear button', async () => {
     document.getElementById('compareField1').value = 'AAPL';
     document.getElementById('compareField2').value = 'MSFT';
+    document.getElementById('runCompareBtn').click();
+    await tick();
+
+    expect(global.__chartInstance).toBeTruthy();
+    expect(global.__chartInstance.data.datasets.length).toBe(2);
+    expect(document.querySelectorAll('#perfTableBody tr').length).toBe(2);
+
+    document.getElementById('compareField1').value = 'AAPL';
+    document.getElementById('compareField2').value = 'MSFT';
     document.getElementById('clearCompareBtn').click();
     await tick();
 
     expect(document.getElementById('compareField1').value).toBe('');
     expect(document.getElementById('compareField2').value).toBe('');
+    expect(global.__chartInstance.data.datasets).toHaveLength(0);
+    expect(global.__chartInstance.data.labels).toHaveLength(0);
+    expect(document.querySelectorAll('#perfTableBody tr')).toHaveLength(0);
   });
 
   it('supports MPM portfolios with subsets and compares them against subsets and direct stocks', async () => {
