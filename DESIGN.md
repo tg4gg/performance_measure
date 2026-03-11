@@ -368,6 +368,11 @@ Endpoints:
 2. `GET /api/performance/batch?symbols=a,b,c`
 3. `GET /api/resolve?query=...`
 
+Regla de carga:
+
+- cuando la UI necesite varios símbolos a la vez para comparar o calcular métricas, debe cargarlos en paralelo o por batch
+- si uno falla, la app debe preservar la información parcial disponible y mostrar advertencias claras para los símbolos afectados
+
 Fuentes externas:
 
 - Yahoo Finance Chart

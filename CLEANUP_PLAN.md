@@ -16,6 +16,12 @@ Phase 2 completed on 2026-03-11.
 - Version bumped to `0.4.0`.
 - Current validation status: `26/26` tests passing.
 
+Phase 3 completed on 2026-03-11.
+- Chose parallel per-symbol loading instead of the batch endpoint to preserve the existing partial-failure behavior with minimal surface-area change.
+- Updated client-side symbol loading so comparisons and MPM metric refreshes fetch market data concurrently.
+- Reused the existing partial-warning and missing-data regression coverage, then re-ran the full suite.
+- Current validation status: `26/26` tests passing.
+
 ## Goal
 
 Improve correctness first, then UX consistency, then performance. Do not start with refactors that change structure before the behavioral issues below are fixed and verified.
@@ -135,6 +141,7 @@ Required tests:
 ### 5. Client-side symbol loading is serialized despite a batch endpoint
 
 Severity: Low
+Status: Completed on 2026-03-11
 
 Problem:
 - The client loads symbol series sequentially.
@@ -195,11 +202,11 @@ Follow this order unless new information forces reprioritization:
 
 ### Phase 3: Performance
 
-- [ ] Decide whether to use the existing batch endpoint or parallel single-symbol fetches.
-- [ ] Implement the chosen loading improvement.
-- [ ] Preserve warning behavior for partial failures.
-- [ ] Add or update tests as needed.
-- [ ] Run `npm test`.
+- [x] Decide whether to use the existing batch endpoint or parallel single-symbol fetches.
+- [x] Implement the chosen loading improvement.
+- [x] Preserve warning behavior for partial failures.
+- [x] Add or update tests as needed.
+- [x] Run `npm test`.
 
 ## Re-Check Procedure Before Each Change
 

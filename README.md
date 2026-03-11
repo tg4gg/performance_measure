@@ -20,6 +20,7 @@ Web app para analizar performance de activos financieros en dos modos paralelos:
   - Yahoo Finance Search
   - OpenFIGI para WKN/ISIN cuando Yahoo no devuelve match directo
 - Caché local de resolución de símbolos.
+- Carga paralela de datos de mercado para comparaciones y métricas MPM, preservando advertencias parciales por símbolo.
 - Chart.js con zoom y leyenda HTML custom.
 - Selector de rango con `YTD`, `1Y`, `3Y`, `5Y`, `10Y` y fecha manual de compra.
 - Tabla resumen con `YTD`, `1Y`, `3Y` y retorno desde fecha seleccionada.

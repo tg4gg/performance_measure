@@ -1858,14 +1858,34 @@ async function resolveComparisonEntrySafe(value, mode) {
 
 async function loadSymbolsDataSafe(symbols) {
   const symbolsData = {};
+  const results = await Promise.all(
+    symbols.map(async (symbol) => {
+      try {
+        return {
+          symbol,
+          points: await getSymbolSeries(symbol),
+          error: null
+        };
+      } catch (err) {
+        return {
+          symbol,
+          points: null,
+          error: err?.message || 'Sin datos'
+        };
+      }
+    })
+  );
+
   const failed = [];
-  for (const symbol of symbols) {
-    try {
-      symbolsData[symbol] = await getSymbolSeries(symbol);
-    } catch (err) {
-      failed.push({ symbol, error: err?.message || 'Sin datos' });
+  results.forEach((result) => {
+    if (result.error) {
+      failed.push({ symbol: result.symbol, error: result.error });
+      return;
     }
-  }
+
+    symbolsData[result.symbol] = result.points;
+  });
+
   return { symbolsData, failed };
 }
 
