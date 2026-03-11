@@ -642,6 +642,14 @@ function cloneMetricPayload(payload) {
   return payload ? JSON.parse(JSON.stringify(payload)) : null;
 }
 
+function buildMetricsError(message) {
+  return { error: message };
+}
+
+function buildMetricsLoadError(symbols) {
+  return buildMetricsError(`Sin datos para: ${symbols.join(', ')}.`);
+}
+
 function createMetricCacheKey(entry) {
   const holdings = (entry?.holdings || []).map((holding) => ({
     symbol: holding.symbol,
@@ -687,6 +695,7 @@ function renderMetricGrid(metrics) {
       <div class="metric-chip"><strong>Value USD</strong><span>${formatUsd(metrics.currentValueUsd)}</span></div>
       <div class="metric-chip"><strong>Value EUR</strong><span>${formatEur(metrics.currentValueEur)}</span></div>
     </div>
+    ${metrics.note ? `<div class="metrics-note">${escapeHtml(metrics.note)}</div>` : ''}
   `;
 }
 
@@ -901,11 +910,33 @@ async function refreshMpmSectionMetrics(force = false) {
     ...new Set(targets.flatMap((target) => (target.entry.holdings || []).map((holding) => holding.symbol)))
   ];
   symbols.push(EURUSD_SYMBOL);
-  const { symbolsData } = await loadSymbolsDataSafe([...new Set(symbols)]);
+  const { symbolsData, failed } = await loadSymbolsDataSafe([...new Set(symbols)]);
+  const failedBySymbol = new Map(failed.map((item) => [item.symbol, item.error || 'Sin datos']));
+  const missingMetricSymbols = new Set();
+  const eurUnavailable = failedBySymbol.has(EURUSD_SYMBOL);
 
   targets.forEach((target) => {
+    const requiredSymbols = [...new Set((target.entry.holdings || []).map((holding) => holding.symbol).filter(Boolean))];
+    const missingSymbols = requiredSymbols.filter((symbol) => failedBySymbol.has(symbol));
+
+    if (missingSymbols.length > 0) {
+      missingSymbols.forEach((symbol) => missingMetricSymbols.add(symbol));
+      const metrics = buildMetricsLoadError(missingSymbols);
+      if (target.kind === 'full') {
+        modeState.sectionMetrics.full = metrics;
+      } else {
+        modeState.sectionMetrics.items[target.id] = metrics;
+      }
+      return;
+    }
+
     const metrics = computeEntrySnapshot(target.entry, symbolsData, 'mpm');
-    storeCachedMetricPayload(target.cacheKey, metrics);
+    if (eurUnavailable) {
+      metrics.note = 'Value EUR no disponible por falta de EURUSD=X.';
+    } else {
+      storeCachedMetricPayload(target.cacheKey, metrics);
+    }
+
     if (target.kind === 'full') {
       modeState.sectionMetrics.full = metrics;
     } else {
@@ -913,7 +944,13 @@ async function refreshMpmSectionMetrics(force = false) {
     }
   });
 
-  modeState.sectionMetrics.status = `Actualizado ${new Date().toLocaleString()}`;
+  if (missingMetricSymbols.size > 0) {
+    modeState.sectionMetrics.status = `Metricas incompletas: faltan datos para ${[...missingMetricSymbols].join(', ')}.`;
+  } else if (eurUnavailable) {
+    modeState.sectionMetrics.status = `Actualizado ${new Date().toLocaleString()} (sin conversion EUR).`;
+  } else {
+    modeState.sectionMetrics.status = `Actualizado ${new Date().toLocaleString()}`;
+  }
   modeState.sectionMetrics.refreshedAt = Date.now();
   renderDraftMetricsPanel();
   renderAssetsDraft();
@@ -985,8 +1022,36 @@ function resetCollectionEditor() {
   saveGroupBtn.textContent = getModeConfig().saveLabel;
 }
 
+function findMpmCollectionDependents(name, collections = getModeState('mpm').collections) {
+  const target = String(name || '').trim().toLowerCase();
+  if (!target) return [];
+
+  return collections.filter((collection) => {
+    const collectionName = String(collection?.name || '').trim().toLowerCase();
+    if (!collectionName || collectionName === target) return false;
+    return (collection.items || []).some(
+      (item) => item.type === 'portfolio' && String(item.refName || '').trim().toLowerCase() === target
+    );
+  });
+}
+
 function deleteCollection(index) {
   const modeState = getActiveModeState();
+  const target = modeState.collections[index];
+  if (!target) return;
+
+  if (state.activeMode === 'mpm') {
+    const dependents = findMpmCollectionDependents(target.name, modeState.collections);
+    if (dependents.length > 0) {
+      alert(
+        `No se puede eliminar "${target.name}" porque lo usan estos portfolios: ${dependents
+          .map((collection) => collection.name)
+          .join(', ')}.`
+      );
+      return;
+    }
+  }
+
   modeState.collections.splice(index, 1);
   persistModeCollections(state.activeMode);
 
@@ -1246,6 +1311,9 @@ function buildMpmHoldingSeries(points, holding, range, options = {}) {
   const soldPoint = sellDate ? [...points].reverse().find((point) => point.date <= sellDate) : null;
   const soldClose = soldPoint?.close ?? null;
   const entryPoint = getHoldingEntryPointForRange(points, holding, range === 'custom' ? options : {});
+  if (range !== 'custom' && sanitizeDate(holding.buyDate) && !entryPoint) {
+    return [];
+  }
   const entryClose = getEffectiveHoldingClose(entryPoint, sellDate, soldClose);
   const fallbackBase = entryClose ?? points[0]?.close;
   const purchasePrice =
@@ -1280,6 +1348,9 @@ function buildMpmCompositeSeries(holdings, symbolsData, range, options = {}) {
       const soldPoint = sellDate ? [...points].reverse().find((point) => point.date <= sellDate) : null;
       const soldClose = soldPoint?.close ?? null;
       const entryPoint = getHoldingEntryPointForRange(points, holding, range === 'custom' ? options : {});
+      if (range !== 'custom' && sanitizeDate(holding.buyDate) && !entryPoint) {
+        return null;
+      }
       const entryClose = getEffectiveHoldingClose(entryPoint, sellDate, soldClose);
       const fallbackBase = entryClose ?? points[0]?.close;
       const basePerUnit =

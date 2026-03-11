@@ -51,8 +51,10 @@ Web app para analizar performance de activos financieros en dos modos paralelos:
   - stocks directos
 - Selector manual `Since purchase date` para rebalancear el chart como compra hipotética desde una fecha concreta.
 - `buyDate` define cuándo entra una posición al cálculo.
+- Si `buyDate` queda después del último dato de mercado disponible, la posición permanece fuera del cálculo hasta que existan datos en o después de esa fecha.
 - `sellDate` congela la posición desde la fecha de venta.
 - Los portfolios ponderan por costo base (`purchasePrice * units`, o fallback al primer precio disponible si falta).
+- No se permite eliminar un portfolio guardado si otro portfolio todavía lo referencia como subset.
 - En MPM, el rango manual rebasa el chart desde la fecha elegida sin alterar `All time %`, `Gain USD`, `Gain/unit`, `Value USD` ni `Value EUR`, que siguen usando el costo base real guardado.
 - En la sección `2)` se muestran 5 métricas para:
   - cada compra concreta en el draft
@@ -67,6 +69,7 @@ Web app para analizar performance de activos financieros en dos modos paralelos:
 - Las métricas MPM se guardan en `localStorage` y:
   - se reutilizan por hasta 1 día
   - se recalculan automáticamente si están vencidas o cambia el draft
+  - si falta mercado para algún holding requerido, se muestra un error explícito y no se cachea el total incompleto
   - se pueden recalcular manualmente con `Recalcular metricas`
 
 ## Ejemplos de entrada MPM

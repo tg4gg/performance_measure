@@ -604,6 +604,26 @@ describe('chart rendering flows', () => {
     expect(Object.keys(metricsCache).length).toBeGreaterThan(0);
   });
 
+  it('shows an explicit metrics error and skips full-draft caching when a holding has no market data', async () => {
+    document.querySelector('[data-mode="mpm"]').click();
+    await tick();
+
+    const rawInput = document.getElementById('rawInput');
+    const detectBtn = document.getElementById('detectBtn');
+
+    rawInput.value = 'AAPL, price=95, units=2\nNFLX, price=101, units=1';
+    rawInput.dispatchEvent(new window.Event('input'));
+    detectBtn.click();
+    await tick();
+
+    expect(document.getElementById('draftMetricsCard').textContent).toContain('Sin datos para: NFLX.');
+    expect(document.getElementById('draftMetricsStatus').textContent).toContain('Metricas incompletas');
+
+    const metricsCache = JSON.parse(localStorage.getItem('mpmMetricsCache'));
+    expect(metricsCache).toBeTruthy();
+    expect(Object.keys(metricsCache)).toHaveLength(1);
+  });
+
   it('expands nested MPM holdings when viewing portfolio holdings', async () => {
     document.querySelector('[data-mode="mpm"]').click();
     await tick();
@@ -685,6 +705,43 @@ describe('chart rendering flows', () => {
     expect(cells[9]).toBe('€280.00');
   });
 
+  it('excludes holdings whose buyDate is later than the latest available quote', async () => {
+    document.querySelector('[data-mode="mpm"]').click();
+    await tick();
+
+    const rawInput = document.getElementById('rawInput');
+    const detectBtn = document.getElementById('detectBtn');
+    const groupName = document.getElementById('groupName');
+    const saveGroupBtn = document.getElementById('saveGroupBtn');
+
+    rawInput.value = 'AAPL, price=95, units=2';
+    rawInput.dispatchEvent(new window.Event('input'));
+    detectBtn.click();
+    await tick();
+    groupName.value = 'Only AAPL';
+    groupName.dispatchEvent(new window.Event('input'));
+    saveGroupBtn.click();
+    await tick();
+
+    rawInput.value = 'AAPL, price=95, units=2\nMSFT, price=101, units=1, buyDate=2027-01-02';
+    rawInput.dispatchEvent(new window.Event('input'));
+    detectBtn.click();
+    await tick();
+    groupName.value = 'Future mix';
+    groupName.dispatchEvent(new window.Event('input'));
+    saveGroupBtn.click();
+    await tick();
+
+    document.getElementById('compareField1').value = 'Only AAPL';
+    document.getElementById('compareField2').value = 'Future mix';
+    document.getElementById('runCompareBtn').click();
+    await tick();
+
+    expect(global.__chartInstance).toBeTruthy();
+    expect(global.__chartInstance.data.datasets).toHaveLength(2);
+    expect(global.__chartInstance.data.datasets[0].data).toEqual(global.__chartInstance.data.datasets[1].data);
+  });
+
   it('overrides MPM chart rebasing from a selected purchase date without changing all-time cost basis', async () => {
     document.querySelector('[data-mode="mpm"]').click();
     await tick();
@@ -718,5 +775,46 @@ describe('chart rendering flows', () => {
     const cells = [...document.querySelectorAll('#perfTableBody tr:first-child td')].map((cell) => cell.textContent.trim());
     expect(cells[4]).toBe('+21.74%');
     expect(cells[5]).toBe('+76.84%');
+  });
+
+  it('blocks deleting an MPM portfolio that is still referenced as a subset', async () => {
+    document.querySelector('[data-mode="mpm"]').click();
+    await tick();
+
+    const rawInput = document.getElementById('rawInput');
+    const detectBtn = document.getElementById('detectBtn');
+    const groupName = document.getElementById('groupName');
+    const saveGroupBtn = document.getElementById('saveGroupBtn');
+    const addSubsetBtn = document.getElementById('addSubsetBtn');
+    const subsetInput = document.getElementById('subsetPortfolioInput');
+
+    rawInput.value = 'AAPL, price=95, units=2';
+    rawInput.dispatchEvent(new window.Event('input'));
+    detectBtn.click();
+    await tick();
+    groupName.value = 'Core';
+    groupName.dispatchEvent(new window.Event('input'));
+    saveGroupBtn.click();
+    await tick();
+
+    rawInput.value = 'GLD, price=101, units=2';
+    rawInput.dispatchEvent(new window.Event('input'));
+    detectBtn.click();
+    await tick();
+    subsetInput.value = 'Core';
+    addSubsetBtn.click();
+    await tick();
+    groupName.value = 'Master';
+    groupName.dispatchEvent(new window.Event('input'));
+    saveGroupBtn.click();
+    await tick();
+
+    const deleteBtn = document.querySelector('button[data-action="delete"][data-index="0"]');
+    deleteBtn.click();
+    await tick();
+
+    expect(global.__alerts.at(-1)).toContain('No se puede eliminar "Core"');
+    expect(document.getElementById('groupsContainer').textContent).toContain('Core');
+    expect(document.getElementById('groupsContainer').textContent).toContain('Master');
   });
 });

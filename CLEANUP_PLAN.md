@@ -2,6 +2,14 @@
 
 This document captures the current cleanup and hardening plan for the repository so it can be loaded later and executed step by step.
 
+## Progress
+
+Phase 1 completed on 2026-03-11.
+- Fixed future-`buyDate` exclusion for MPM holdings when no market data exists yet.
+- Blocked deletion of saved MPM portfolios that are still referenced as subsets.
+- Added explicit section-2 metric errors for missing holding market data and stopped caching incomplete totals.
+- Current validation status: `26/26` tests passing.
+
 ## Goal
 
 Improve correctness first, then UX consistency, then performance. Do not start with refactors that change structure before the behavioral issues below are fixed and verified.
@@ -11,6 +19,7 @@ Improve correctness first, then UX consistency, then performance. Do not start w
 ### 1. Future `buyDate` handling is incorrect in MPM
 
 Severity: High
+Status: Completed on 2026-03-11
 
 Problem:
 - If a holding has a `buyDate` later than the latest available market quote, the code currently falls back to the first historical point.
@@ -39,6 +48,7 @@ Required tests:
 ### 2. Deleting an MPM portfolio can leave dangling subset references
 
 Severity: Medium
+Status: Completed on 2026-03-11
 
 Problem:
 - A saved MPM portfolio can reference another saved portfolio as a subset.
@@ -68,6 +78,7 @@ Required tests:
 ### 3. MPM section-2 metrics can silently undercount on market-data failures
 
 Severity: Medium
+Status: Completed on 2026-03-11
 
 Problem:
 - Metric refresh fetches market data through `loadSymbolsDataSafe()`.
@@ -153,21 +164,21 @@ Follow this order unless new information forces reprioritization:
 
 ### Phase 1: Correctness
 
-- [ ] Re-read the affected MPM series and snapshot functions.
-- [ ] Implement the future `buyDate` fix.
-- [ ] Add regression tests for future `buyDate`.
-- [ ] Run `npm test`.
+- [x] Re-read the affected MPM series and snapshot functions.
+- [x] Implement the future `buyDate` fix.
+- [x] Add regression tests for future `buyDate`.
+- [x] Run `npm test`.
 
-- [ ] Re-read MPM save/delete/expand flows.
-- [ ] Implement dependent-reference protection for portfolio deletion.
-- [ ] Add tests for subset dependency handling.
-- [ ] Run `npm test`.
+- [x] Re-read MPM save/delete/expand flows.
+- [x] Implement dependent-reference protection for portfolio deletion.
+- [x] Add tests for subset dependency handling.
+- [x] Run `npm test`.
 
-- [ ] Re-read section-2 metrics refresh and cache flows.
-- [ ] Prevent silent partial metrics on symbol-load failures.
-- [ ] Ensure invalid partial results are not cached as complete.
-- [ ] Add tests for failed symbol loads in metrics refresh.
-- [ ] Run `npm test`.
+- [x] Re-read section-2 metrics refresh and cache flows.
+- [x] Prevent silent partial metrics on symbol-load failures.
+- [x] Ensure invalid partial results are not cached as complete.
+- [x] Add tests for failed symbol loads in metrics refresh.
+- [x] Run `npm test`.
 
 ### Phase 2: UX Consistency
 
@@ -194,10 +205,10 @@ Before executing any step later:
 5. Re-run the full test suite.
 6. Update this file by marking completed items and noting any scope changes.
 
-## Baseline Status At Time Of Writing
+## Current Validation Status
 
-Repository status when this plan was created:
-- Test suite passed: `21/21` tests.
+Repository status after the latest completed phase:
+- Test suite passed: `26/26` tests.
 - Key files:
   - [`server.js`](/Users/tim.gaggstatter/MyData/codex/private/portfolio_tracking/server.js)
   - [`public/app.js`](/Users/tim.gaggstatter/MyData/codex/private/portfolio_tracking/public/app.js)

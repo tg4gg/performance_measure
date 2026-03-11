@@ -51,6 +51,7 @@ Cada holding puede tener:
 Reglas:
 
 - `buyDate` define el primer punto desde el cual la posición entra al cálculo.
+- si `buyDate` es posterior al último dato disponible, la posición debe quedar excluida hasta que exista un dato en o después de esa fecha
 - `sellDate` congela el valor de la posición desde esa fecha.
 - si `sellDate < buyDate`, debe rechazarse el draft.
 - las métricas de sección `2)` deben persistirse localmente y recalcularse como máximo una vez por día, salvo refresh manual
@@ -148,6 +149,7 @@ Portfolios MPM pueden contener:
 - referencias a otros portfolios (`subsets`)
 
 Debe detectarse referencia circular entre portfolios.
+No debe permitirse eliminar un portfolio si otro portfolio guardado lo referencia como subset.
 
 ### 6.3 Métricas en sección 2)
 
@@ -170,6 +172,8 @@ Reglas:
 - `Gain/unit` solo tiene sentido cuando la selección representa un único activo subyacente
 - `Value EUR` se calcula desde `Value USD` usando el último valor disponible de `EURUSD=X`
 - debe existir un botón manual `Recalcular metricas`
+- si falla la descarga de mercado para un holding requerido, la UI debe mostrar un error explícito
+- resultados incompletos no deben cachearse como métricas válidas finales
 
 ## 7) Comparación
 
